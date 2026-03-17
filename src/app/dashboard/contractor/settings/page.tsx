@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ref, update } from "firebase/database";
+import { useState, useEffect } from "react";
+import { doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -16,12 +16,23 @@ export default function ContractorSettingsPage() {
   const { userProfile, refreshProfile } = useAuth();
   const contractor = userProfile as ContractorUser | null;
   const [form, setForm] = useState({
-    fullName: contractor?.fullName || "",
-    phone: contractor?.phone || "",
-    companyName: contractor?.companyName || "",
-    contactName: contractor?.contactName || "",
+    fullName: "",
+    phone: "",
+    companyName: "",
+    contactName: "",
   });
   const [loading, setLoading] = useState(false);
+
+  // Sync form when contractor profile loads
+  useEffect(() => {
+    if (!contractor) return;
+    setForm({
+      fullName: contractor.fullName || "",
+      phone: contractor.phone || "",
+      companyName: contractor.companyName || "",
+      contactName: contractor.contactName || "",
+    });
+  }, [contractor]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -29,9 +40,16 @@ export default function ContractorSettingsPage() {
 
   const handleSave = async () => {
     if (!contractor) return;
+
+    const phoneDigits = form.phone.replace(/\D/g, "");
+    if (form.phone.trim() && phoneDigits.length !== 10 && !(phoneDigits.length === 11 && phoneDigits[0] === "1")) {
+      toast.error("Enter a valid 10-digit phone number.");
+      return;
+    }
+
     setLoading(true);
     try {
-      await update(ref(db, `users/${contractor.uid}`), {
+      await updateDoc(doc(db, "users", contractor.uid), {
         fullName: form.fullName.trim(),
         phone: form.phone.trim(),
         companyName: form.companyName.trim(),

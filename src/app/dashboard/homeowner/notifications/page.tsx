@@ -1,0 +1,166 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import ProtectedRoute from "@/components/layout/ProtectedRoute";
+import DashboardLayout from "@/components/layout/DashboardLayout";
+import { useAuth } from "@/contexts/AuthContext";
+import { subscribeToNotifications, markNotificationRead, AppNotification } from "@/lib/notifications";
+import Link from "next/link";
+import { formatDate } from "@/lib/utils";
+import {
+  HiBell,
+  HiArrowLeft,
+  HiCheck,
+  HiCheckCircle,
+  HiXCircle,
+  HiChat,
+} from "react-icons/hi";
+
+export default function NotificationsPage() {
+  const { firebaseUser, userProfile } = useAuth();
+  const role = userProfile?.role ?? "homeowner";
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+
+    const unsubscribe = subscribeToNotifications(firebaseUser.uid, (notifs) => {
+      setNotifications(notifs);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, [firebaseUser]);
+
+  const handleMarkRead = async (notificationId: string) => {
+    try {
+      await markNotificationRead(notificationId);
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+    }
+  };
+
+
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case "project_unlocked":
+        return <HiBell className="text-blue-500" />;
+      case "bid_received":
+      case "new_bid":
+        return <HiCheckCircle className="text-green-500" />;
+      case "bid_accepted":
+        return <HiCheck className="text-green-600" />;
+      case "bid_rejected":
+        return <HiXCircle className="text-red-500" />;
+      case "new_message":
+        return <HiChat className="text-orange-500" />;
+      default:
+        return <HiBell className="text-gray-500" />;
+    }
+  };
+
+  const getNotificationLink = (notif: AppNotification) => {
+    switch (notif.type) {
+      case "project_unlocked":
+        return "/dashboard/homeowner/projects";
+      case "bid_received":
+      case "new_bid":
+        return "/dashboard/homeowner/bids";
+      case "bid_accepted":
+      case "bid_rejected":
+        return "/dashboard/contractor/bids";
+      case "new_message":
+      case "message":
+        return `/dashboard/${role}/messages`;
+      default:
+        return "#";
+    }
+  };
+
+  return (
+    <ProtectedRoute allowedRoles={["homeowner", "contractor"]}>
+      <DashboardLayout role={role as "homeowner" | "contractor"}>
+        <div className="space-y-6 max-w-3xl">
+          {/* Page Header */}
+          <div>
+            <Link
+              href={`/dashboard/${role}`}
+              className="inline-flex items-center gap-2 text-gray-600 hover:text-orange-600 transition-colors text-sm mb-4"
+            >
+              <HiArrowLeft size={16} /> Back to Dashboard
+            </Link>
+            <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
+            <p className="text-gray-500 mt-1">
+              Stay updated on your projects, bids, and messages.
+            </p>
+          </div>
+
+          {/* Notifications List */}
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : notifications.length === 0 ? (
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <div className="text-center py-12 text-gray-400">
+                <HiBell size={48} className="mx-auto mb-4 opacity-50" />
+                <p className="font-medium">No notifications</p>
+                <p className="text-sm mt-1">
+                  You&apos;re all caught up! Check back soon for updates.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {notifications.map((notif) => (
+                <a
+                  key={notif.id}
+                  href={getNotificationLink(notif)}
+                  className={`block rounded-xl border transition-all duration-200 ${
+                    notif.read
+                      ? "bg-white border-gray-200 hover:border-orange-200 hover:shadow-sm"
+                      : "bg-orange-50 border-orange-200 hover:border-orange-300 hover:shadow-md"
+                  }`}
+                >
+                  <div className="p-4 flex items-start gap-4">
+                    <div className="flex-shrink-0 p-2.5 bg-white rounded-lg border border-gray-200">
+                      {getNotificationIcon(notif.type)}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-3 mb-1">
+                        <p className="font-semibold text-gray-900">
+                          {notif.title}
+                        </p>
+                        {!notif.read && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleMarkRead(notif.id);
+                            }}
+                            className="text-xs px-2.5 py-1 rounded-full bg-orange-600 text-white hover:bg-orange-700 transition whitespace-nowrap"
+                          >
+                            Mark read
+                          </button>
+                        )}
+                      </div>
+
+                      <p className="text-sm text-gray-600 line-clamp-2">
+                        {notif.message}
+                      </p>
+
+                      <p className="text-xs text-gray-500 mt-2">
+                        {formatDate(notif.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      </DashboardLayout>
+    </ProtectedRoute>
+  );
+}

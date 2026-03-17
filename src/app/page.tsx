@@ -1,18 +1,55 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import { HiShieldCheck, HiLockClosed, HiCreditCard, HiChat, HiClipboardList, HiChartBar } from "react-icons/hi";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
-const CREDIT_PACKAGES = [
-  { name: "Starter", credits: 10, price: 49, perCredit: "4.90" },
-  { name: "Professional", credits: 25, price: 99, perCredit: "3.96", popular: true },
-  { name: "Business", credits: 50, price: 179, perCredit: "3.58" },
-  { name: "Enterprise", credits: 100, price: 299, perCredit: "2.99" },
+interface LandingPackage {
+  name: string;
+  credits: number;
+  price: number;
+  perCredit: string;
+  popular: boolean;
+}
+
+const DEFAULT_LANDING_PACKAGES: LandingPackage[] = [
+  { name: "Starter Pack", credits: 5, price: 29.99, perCredit: "6.00", popular: false },
+  { name: "Standard Pack", credits: 15, price: 79.99, perCredit: "5.33", popular: true },
+  { name: "Pro Pack", credits: 30, price: 149.99, perCredit: "5.00", popular: false },
+  { name: "Enterprise Pack", credits: 60, price: 279.99, perCredit: "4.67", popular: false },
 ];
 
 export default function Home() {
+  const [creditPackages, setCreditPackages] = useState<LandingPackage[]>(DEFAULT_LANDING_PACKAGES);
+
+  useEffect(() => {
+    const loadPackages = async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "creditPackages"));
+        if (snap.exists()) {
+          const data = snap.data();
+          const rawPkgs = data.packages as Array<{ id: string; label: string; credits: number; price: number }> | undefined;
+          if (rawPkgs && rawPkgs.length > 0) {
+            const pkgs: LandingPackage[] = rawPkgs.map((p, idx) => ({
+              name: p.label,
+              credits: p.credits,
+              price: p.price,
+              perCredit: p.credits > 0 ? (p.price / p.credits).toFixed(2) : "0.00",
+              popular: idx === 1,
+            }));
+            setCreditPackages(pkgs);
+          }
+        }
+      } catch {
+        // Keep defaults silently
+      }
+    };
+    loadPackages();
+  }, []);
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
@@ -198,7 +235,7 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {CREDIT_PACKAGES.map((pkg) => (
+            {creditPackages.map((pkg) => (
               <div
                 key={pkg.name}
                 className={`relative p-8 rounded-xl border-2 ${

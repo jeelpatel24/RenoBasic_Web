@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ref, onValue, update } from "firebase/database";
+import { collection, query, where, onSnapshot, updateDoc, doc, deleteField } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { ContractorUser } from "@/types";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
@@ -9,6 +9,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import Link from "next/link";
 import Button from "@/components/ui/Button";
 import toast from "react-hot-toast";
+import { formatDate } from "@/lib/utils";
 import { HiUsers, HiShieldCheck, HiClipboardList, HiCreditCard, HiChat, HiCollection } from "react-icons/hi";
 
 export default function AdminDashboard() {
@@ -21,68 +22,86 @@ export default function AdminDashboard() {
   const [platformStats, setPlatformStats] = useState({ projects: 0, bids: 0, conversations: 0, transactions: 0 });
 
   useEffect(() => {
-    // Real-time listener for users
-    const usersRef = ref(db, "users");
-    const unsubUsers = onValue(usersRef, (snapshot) => {
-      if (!snapshot.exists()) return;
+    // Real-time listener for pending contractors
+    const unsubUsers = onSnapshot(
+      query(
+        collection(db, "users"),
+        where("role", "==", "contractor"),
+        where("verificationStatus", "==", "pending")
+      ),
+      (snapshot) => {
+        setPendingContractors(snapshot.docs.map((doc) => doc.data() as ContractorUser));
+      },
+      (error) => { console.error("Error loading pending contractors:", error); }
+    );
 
-      const data = snapshot.val();
-      const pending: ContractorUser[] = [];
-      let homeowners = 0;
-      let contractors = 0;
-      let admins = 0;
+    // Count all users by role
+    const unsubAllUsers = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        let homeowners = 0;
+        let contractors = 0;
+        let admins = 0;
 
-      Object.values(data).forEach((user: unknown) => {
-        const u = user as Record<string, unknown>;
-        const role = u.role as string;
-        if (role === "homeowner") homeowners++;
-        if (role === "contractor") {
-          contractors++;
-          if (u.verificationStatus === "pending") {
-            pending.push(u as unknown as ContractorUser);
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          switch (data.role) {
+            case "homeowner":
+              homeowners++;
+              break;
+            case "contractor":
+              contractors++;
+              break;
+            case "admin":
+              admins++;
+              break;
           }
-        }
-        if (role === "admin") admins++;
-      });
+        });
 
-      setPendingContractors(pending);
-      setAllUsers({ homeowners, contractors, admins });
-    });
+        setAllUsers({ homeowners, contractors, admins });
+      },
+      (error) => { console.error("Error loading users:", error); }
+    );
 
     // Real-time listener for projects
-    const unsubProjects = onValue(ref(db, "projects"), (snapshot) => {
-      setPlatformStats((prev) => ({
-        ...prev,
-        projects: snapshot.exists() ? Object.keys(snapshot.val() as object).length : 0,
-      }));
-    });
+    const unsubProjects = onSnapshot(
+      collection(db, "projects"),
+      (snapshot) => {
+        setPlatformStats((prev) => ({ ...prev, projects: snapshot.size }));
+      },
+      (error) => { console.error("Error loading projects:", error); }
+    );
 
     // Real-time listener for bids
-    const unsubBids = onValue(ref(db, "bids"), (snapshot) => {
-      setPlatformStats((prev) => ({
-        ...prev,
-        bids: snapshot.exists() ? Object.keys(snapshot.val() as object).length : 0,
-      }));
-    });
+    const unsubBids = onSnapshot(
+      collection(db, "bids"),
+      (snapshot) => {
+        setPlatformStats((prev) => ({ ...prev, bids: snapshot.size }));
+      },
+      (error) => { console.error("Error loading bids:", error); }
+    );
 
     // Real-time listener for conversations
-    const unsubConvs = onValue(ref(db, "conversations"), (snapshot) => {
-      setPlatformStats((prev) => ({
-        ...prev,
-        conversations: snapshot.exists() ? Object.keys(snapshot.val() as object).length : 0,
-      }));
-    });
+    const unsubConvs = onSnapshot(
+      collection(db, "conversations"),
+      (snapshot) => {
+        setPlatformStats((prev) => ({ ...prev, conversations: snapshot.size }));
+      },
+      (error) => { console.error("Error loading conversations:", error); }
+    );
 
     // Real-time listener for transactions
-    const unsubTx = onValue(ref(db, "transactions"), (snapshot) => {
-      setPlatformStats((prev) => ({
-        ...prev,
-        transactions: snapshot.exists() ? Object.keys(snapshot.val() as object).length : 0,
-      }));
-    });
+    const unsubTx = onSnapshot(
+      collection(db, "transactions"),
+      (snapshot) => {
+        setPlatformStats((prev) => ({ ...prev, transactions: snapshot.size }));
+      },
+      (error) => { console.error("Error loading transactions:", error); }
+    );
 
     return () => {
       unsubUsers();
+      unsubAllUsers();
       unsubProjects();
       unsubBids();
       unsubConvs();
@@ -92,9 +111,9 @@ export default function AdminDashboard() {
 
   const handleVerification = async (uid: string, status: "approved" | "rejected") => {
     try {
-      await update(ref(db, `users/${uid}`), {
+      await updateDoc(doc(db, "users", uid), {
         verificationStatus: status,
-        verifiedDate: status === "approved" ? new Date().toISOString() : null,
+        verifiedDate: status === "approved" ? new Date().toISOString() : deleteField(),
         updatedAt: new Date().toISOString(),
       });
       toast.success(`Contractor ${status === "approved" ? "approved" : "rejected"} successfully.`);
@@ -191,7 +210,7 @@ export default function AdminDashboard() {
                           </p>
                           <p className="text-gray-500">
                             <span className="font-medium text-gray-700">Registered:</span>{" "}
-                            {new Date(contractor.createdAt).toLocaleDateString()}
+                            {formatDate(contractor.createdAt)}
                           </p>
                           <p className="text-gray-500">
                             <span className="font-medium text-gray-700">BN:</span>{" "}

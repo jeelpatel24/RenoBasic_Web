@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ref, onValue } from "firebase/database";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import Link from "next/link";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
@@ -17,49 +17,42 @@ export default function HomeownerDashboard() {
     if (!userProfile) return;
     const uid = userProfile.uid;
 
-    // Real-time listener for projects
-    const unsubProjects = onValue(ref(db, "projects"), (snapshot) => {
-      let projects = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { homeownerUid: string }>).forEach((p) => {
-          if (p.homeownerUid === uid) projects++;
-        });
-      }
-      setStats((prev) => ({ ...prev, projects }));
-    });
+    // Real-time listener for projects (only open ones for "Active Projects")
+    const unsubProjects = onSnapshot(
+      query(collection(db, "projects"), where("homeownerUid", "==", uid)),
+      (snapshot) => {
+        const openCount = snapshot.docs.filter((d) => d.data().status === "open").length;
+        setStats((prev) => ({ ...prev, projects: openCount }));
+      },
+      (error) => { console.error("Error loading projects:", error); }
+    );
 
     // Real-time listener for conversations
-    const unsubConvs = onValue(ref(db, "conversations"), (snapshot) => {
-      let conversations = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { homeownerUid: string }>).forEach((c) => {
-          if (c.homeownerUid === uid) conversations++;
-        });
-      }
-      setStats((prev) => ({ ...prev, conversations }));
-    });
+    const unsubConvs = onSnapshot(
+      query(collection(db, "conversations"), where("homeownerUid", "==", uid)),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, conversations: snapshot.size }));
+      },
+      (error) => { console.error("Error loading conversations:", error); }
+    );
 
     // Real-time listener for unlocks
-    const unsubUnlocks = onValue(ref(db, "unlocks"), (snapshot) => {
-      let unlocks = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { homeownerUid?: string }>).forEach((u) => {
-          if (u.homeownerUid === uid) unlocks++;
-        });
-      }
-      setStats((prev) => ({ ...prev, unlocks }));
-    });
+    const unsubUnlocks = onSnapshot(
+      query(collection(db, "unlocks"), where("homeownerUid", "==", uid)),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, unlocks: snapshot.size }));
+      },
+      (error) => { console.error("Error loading unlocks:", error); }
+    );
 
     // Real-time listener for bids
-    const unsubBids = onValue(ref(db, "bids"), (snapshot) => {
-      let bids = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { homeownerUid: string }>).forEach((b) => {
-          if (b.homeownerUid === uid) bids++;
-        });
-      }
-      setStats((prev) => ({ ...prev, bids }));
-    });
+    const unsubBids = onSnapshot(
+      query(collection(db, "bids"), where("homeownerUid", "==", uid)),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, bids: snapshot.size }));
+      },
+      (error) => { console.error("Error loading bids:", error); }
+    );
 
     return () => {
       unsubProjects();

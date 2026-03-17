@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, push, set, onValue, query, orderByChild } from "firebase/database";
+import { collection, addDoc, query, where, onSnapshot, orderBy } from "firebase/firestore";
+// import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; // TODO: enable when Firebase Storage is activated
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
+// import ImageUpload from "@/components/ui/ImageUpload"; // TODO: enable when Firebase Storage is activated
 import Link from "next/link";
 import {
   Project,
@@ -26,13 +28,13 @@ import {
   PROVINCE_OPTIONS,
 } from "@/types";
 import toast from "react-hot-toast";
+import { formatDate } from "@/lib/utils";
 import {
   HiClipboardList,
   HiPlusCircle,
   HiLocationMarker,
   HiClock,
   HiArrowRight,
-  HiPhotograph,
   HiDocumentText,
   HiHome,
   HiChat,
@@ -95,6 +97,7 @@ export default function HomeownerProjectsPage() {
     contactPreference: "in_app",
   });
 
+  // const [imageFiles, setImageFiles] = useState<File[]>([]); // TODO: enable when Firebase Storage is activated
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -105,25 +108,19 @@ export default function HomeownerProjectsPage() {
   useEffect(() => {
     if (!userProfile) return;
 
-    const projectsRef = query(ref(db, "projects"), orderByChild("homeownerUid"));
-    const unsubscribe = onValue(projectsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const allProjects: Project[] = Object.entries(data).map(
-          ([id, value]) => ({ ...(value as Omit<Project, "id">), id })
-        );
-        const userProjects = allProjects
-          .filter((p) => p.homeownerUid === userProfile.uid)
-          .sort(
-            (a, b) =>
-              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-        setProjects(userProjects);
-      } else {
-        setProjects([]);
-      }
-      setProjectsLoading(false);
-    });
+    const q = query(
+      collection(db, "projects"),
+      where("homeownerUid", "==", userProfile.uid),
+      orderBy("createdAt", "desc")
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setProjects(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Project)));
+        setProjectsLoading(false);
+      },
+      (error) => { console.error("Error loading projects:", error); setProjectsLoading(false); }
+    );
 
     return () => unsubscribe();
   }, [userProfile]);
@@ -194,15 +191,11 @@ export default function HomeownerProjectsPage() {
 
     setLoading(true);
     try {
-      const projectsRef = ref(db, "projects");
-      const newProjectRef = push(projectsRef);
-      const projectId = newProjectRef.key!;
       const now = new Date().toISOString();
       const category = form.category as ProjectCategory;
       const budgetRange = form.budgetRange as BudgetRange;
 
       const projectData = {
-        id: projectId,
         homeownerUid: userProfile!.uid,
         projectTitle: form.projectTitle.trim(),
         category,
@@ -238,7 +231,10 @@ export default function HomeownerProjectsPage() {
         },
       };
 
-      await set(newProjectRef, projectData);
+      await addDoc(collection(db, "projects"), projectData);
+
+      // TODO: image upload — enable when Firebase Storage is activated
+      // if (imageFiles.length > 0) { ... upload to storage ... }
 
       toast.success("Project posted successfully!");
       setSuccessMessage(
@@ -896,18 +892,8 @@ export default function HomeownerProjectsPage() {
                   subtitle="Attach photos, plans, or documents related to your project."
                 />
 
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                  <HiPhotograph
-                    size={48}
-                    className="mx-auto mb-3 text-gray-300"
-                  />
-                  <p className="text-sm font-medium text-gray-500">
-                    File uploads coming in Iteration 2
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    You will be able to attach photos, blueprints, and documents
-                    here.
-                  </p>
+                <div className="flex items-center justify-center h-24 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50">
+                  <p className="text-sm text-gray-400">Photo uploads coming soon</p>
                 </div>
               </div>
 
@@ -1007,14 +993,7 @@ export default function HomeownerProjectsPage() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs text-gray-400">
-                          {new Date(project.createdAt).toLocaleDateString(
-                            "en-CA",
-                            {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                            }
-                          )}
+                          {formatDate(project.createdAt)}
                         </span>
                         <HiArrowRight size={16} className="text-gray-400" />
                       </div>

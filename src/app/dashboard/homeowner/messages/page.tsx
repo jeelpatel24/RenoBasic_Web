@@ -13,6 +13,7 @@ import {
   markMessagesAsRead,
 } from "@/lib/messages";
 import toast from "react-hot-toast";
+import { formatTime } from "@/lib/utils";
 import { HiChat, HiPaperAirplane, HiArrowLeft } from "react-icons/hi";
 
 export default function HomeownerMessagesPage() {
@@ -26,7 +27,12 @@ export default function HomeownerMessagesPage() {
 
   useEffect(() => {
     if (!userProfile) return;
-    const unsub = subscribeToConversations(userProfile.uid, "homeowner", setConversations);
+    const unsub = subscribeToConversations(
+      userProfile.uid,
+      "homeowner",
+      setConversations,
+      (error) => { console.error("Error loading conversations:", error); }
+    );
     return () => unsub();
   }, [userProfile]);
 
@@ -36,10 +42,15 @@ export default function HomeownerMessagesPage() {
     return () => unsub();
   }, [activeConv]);
 
+  // Mark as read only when conversation changes, not on every new message
   useEffect(() => {
     if (activeConv && userProfile) markMessagesAsRead(activeConv, userProfile.uid);
+  }, [activeConv, userProfile]);
+
+  // Auto-scroll when messages update
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, activeConv, userProfile]);
+  }, [messages]);
 
   const handleSend = async () => {
     if (!newMessage.trim() || !activeConv || !userProfile) return;
@@ -121,7 +132,7 @@ export default function HomeownerMessagesPage() {
                           }`}>
                             <p>{msg.content}</p>
                             <p className={`text-[10px] mt-1 ${isMine ? "text-orange-100" : "text-gray-400"}`}>
-                              {new Date(msg.timestamp).toLocaleTimeString("en-CA", { hour: "2-digit", minute: "2-digit" })}
+                              {formatTime(msg.timestamp)}
                             </p>
                           </div>
                         </div>

@@ -9,6 +9,7 @@ import Footer from "@/components/layout/Footer";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { loginUser, getDashboardRoute } from "@/lib/auth";
+import { auth } from "@/lib/firebase";
 import { validateEmail } from "@/lib/validation";
 
 export default function LoginPage() {
@@ -38,6 +39,11 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const userProfile = await loginUser(form.email, form.password);
+      // Redirect unverified non-admin users to email verification
+      if (userProfile.role !== "admin" && !auth.currentUser?.emailVerified) {
+        router.push("/verify-email");
+        return;
+      }
       toast.success("Welcome back!");
       router.push(getDashboardRoute(userProfile.role));
     } catch (error: unknown) {

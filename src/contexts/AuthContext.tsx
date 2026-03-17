@@ -27,8 +27,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async () => {
     if (firebaseUser) {
-      const profile = await getUserProfile(firebaseUser.uid);
-      setUserProfile(profile);
+      try {
+        const profile = await getUserProfile(firebaseUser.uid);
+        setUserProfile(profile);
+      } catch {
+        // keep existing profile on error
+      }
     }
   };
 
@@ -36,8 +40,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
       if (user) {
-        const profile = await getUserProfile(user.uid);
-        setUserProfile(profile);
+        try {
+          const profile = await getUserProfile(user.uid);
+          setUserProfile(profile);
+        } catch {
+          setUserProfile(null);
+        }
       } else {
         setUserProfile(null);
       }

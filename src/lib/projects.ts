@@ -1,9 +1,17 @@
 import { db } from "@/lib/firebase";
-import { ref, get, update, push } from "firebase/database";
+import {
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  runTransaction,
+} from "firebase/firestore";
 import { ProjectUnlock, ProjectPrivateDetails } from "@/types";
 
 /**
- * Unlock a project for a contractor. Performs an atomic multi-path update:
+ * Unlock a project for a contractor. Performs an atomic transaction:
  * - Validates the contractor hasn't already unlocked this project
  * - Validates the contractor has sufficient credit balance
  * - Deducts credits from the contractor's balance
@@ -15,63 +23,69 @@ export async function unlockProject(
   projectId: string,
   creditCost: number
 ): Promise<void> {
-  const unlockKey = `${contractorUid}_${projectId}`;
+  const unlockDocId = `${contractorUid}_${projectId}`;
 
-  // Check if already unlocked
-  const unlockRef = ref(db, `unlocks/${unlockKey}`);
-  const unlockSnap = await get(unlockRef);
-  if (unlockSnap.exists()) {
-    throw new Error("You have already unlocked this project.");
-  }
+  return runTransaction(db, async (transaction) => {
+    // Check if already unlocked
+    const unlockRef = doc(db, "unlocks", unlockDocId);
+    const unlockSnap = await transaction.get(unlockRef);
+    if (unlockSnap.exists()) {
+      throw new Error("You have already unlocked this project.");
+    }
 
-  // Get current credit balance
-  const balanceRef = ref(db, `users/${contractorUid}/creditBalance`);
-  const balanceSnap = await get(balanceRef);
-  const currentBalance = (balanceSnap.val() as number) ?? 0;
+    // Get current credit balance
+    const userRef = doc(db, "users", contractorUid);
+    const userSnap = await transaction.get(userRef);
+    if (!userSnap.exists()) {
+      throw new Error("User not found.");
+    }
+    const currentBalance = (userSnap.data().creditBalance ?? 0) as number;
 
-  if (currentBalance < creditCost) {
-    throw new Error(
-      `Insufficient credits. You need ${creditCost} credits but have ${currentBalance}.`
-    );
-  }
+    if (currentBalance < creditCost) {
+      throw new Error(
+        `Insufficient credits. You need ${creditCost} credits but have ${currentBalance}.`
+      );
+    }
 
-  // Get homeownerUid from project
-  const homeownerRef = ref(db, `projects/${projectId}/homeownerUid`);
-  const homeownerSnap = await get(homeownerRef);
-  const homeownerUid = homeownerSnap.val() as string;
+    // Get homeownerUid from project
+    const projectRef = doc(db, "projects", projectId);
+    const projectSnap = await transaction.get(projectRef);
+    if (!projectSnap.exists()) {
+      throw new Error("Project not found.");
+    }
+    const homeownerUid = projectSnap.data().homeownerUid as string;
 
-  if (!homeownerUid) {
-    throw new Error("Project not found.");
-  }
+    const now = new Date().toISOString();
 
-  const now = new Date().toISOString();
-  const transactionId = push(ref(db, "transactions")).key!;
+    const unlockRecord: ProjectUnlock = {
+      id: unlockDocId,
+      contractorUid,
+      projectId,
+      homeownerUid,
+      creditCost,
+      unlockedAt: now,
+    };
 
-  const unlockRecord: ProjectUnlock = {
-    id: unlockKey,
-    contractorUid,
-    projectId,
-    homeownerUid,
-    creditCost,
-    unlockedAt: now,
-  };
+    // Update user credit balance
+    transaction.update(userRef, {
+      creditBalance: currentBalance - creditCost,
+    });
 
-  // Atomic multi-path update
-  const updates: Record<string, unknown> = {
-    [`users/${contractorUid}/creditBalance`]: currentBalance - creditCost,
-    [`unlocks/${unlockKey}`]: unlockRecord,
-    [`transactions/${transactionId}`]: {
-      id: transactionId,
+    // Create unlock record
+    transaction.set(unlockRef, unlockRecord);
+
+    // Create transaction record
+    const transactionRef = doc(collection(db, "transactions"));
+    transaction.set(transactionRef, {
+      id: transactionRef.id,
       contractorUid,
       creditAmount: creditCost,
       cost: 0,
       type: "unlock",
       relatedProjectId: projectId,
       timestamp: now,
-    },
-  };
-
-  await update(ref(db), updates);
+    });
+  });
 }
 
 /**
@@ -80,18 +94,15 @@ export async function unlockProject(
 export async function getContractorUnlocks(
   contractorUid: string
 ): Promise<string[]> {
-  const unlocksRef = ref(db, "unlocks");
-  const snapshot = await get(unlocksRef);
+  const q = query(
+    collection(db, "unlocks"),
+    where("contractorUid", "==", contractorUid)
+  );
+  const snapshot = await getDocs(q);
 
-  if (!snapshot.exists()) return [];
-
-  const data = snapshot.val() as Record<string, ProjectUnlock>;
   const projectIds: string[] = [];
-
-  Object.values(data).forEach((unlock) => {
-    if (unlock.contractorUid === contractorUid) {
-      projectIds.push(unlock.projectId);
-    }
+  snapshot.forEach((doc) => {
+    projectIds.push(doc.data().projectId);
   });
 
   return projectIds;
@@ -103,11 +114,11 @@ export async function getContractorUnlocks(
 export async function getProjectPrivateDetails(
   projectId: string
 ): Promise<ProjectPrivateDetails | null> {
-  const detailsRef = ref(db, `projects/${projectId}/privateDetails`);
-  const snapshot = await get(detailsRef);
+  const projectRef = doc(db, "projects", projectId);
+  const snapshot = await getDoc(projectRef);
 
   if (!snapshot.exists()) return null;
 
-  return snapshot.val() as ProjectPrivateDetails;
+  return snapshot.data().privateDetails as ProjectPrivateDetails;
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, onValue, query, orderByChild } from "firebase/database";
+import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -20,7 +20,9 @@ import {
   PreferredStartDate,
 } from "@/types";
 import { unlockProject, getContractorUnlocks } from "@/lib/projects";
+import { createNotification } from "@/lib/notifications";
 import toast from "react-hot-toast";
+import { formatDate } from "@/lib/utils";
 import {
   HiClipboardList,
   HiLocationMarker,
@@ -42,6 +44,9 @@ export default function ContractorMarketplacePage() {
   const [unlockedIds, setUnlockedIds] = useState<string[]>([]);
   const [unlocking, setUnlocking] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<ProjectCategory | "all">("all");
+  const [budgetFilter, setBudgetFilter] = useState<string[]>([]);
+  const [cityFilter, setCityFilter] = useState("");
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "budget_high" | "budget_low">("newest");
   const [confirmUnlock, setConfirmUnlock] = useState<Project | null>(null);
 
   // Fetch unlocked project IDs
@@ -52,30 +57,82 @@ export default function ContractorMarketplacePage() {
 
   // Fetch all projects
   useEffect(() => {
-    const projectsRef = query(ref(db, "projects"), orderByChild("createdAt"));
-    const unsubscribe = onValue(projectsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const allProjects: Project[] = Object.entries(data).map(
-          ([id, value]) => ({ ...(value as Omit<Project, "id">), id })
-        );
-        allProjects.sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+    const projectsRef = query(
+      collection(db, "projects"),
+      where("status", "==", "open"),
+      orderBy("createdAt", "desc")
+    );
+    const unsubscribe = onSnapshot(
+      projectsRef,
+      (snapshot) => {
+        const allProjects = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        } as Project));
         setProjects(allProjects);
-      } else {
-        setProjects([]);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Error fetching projects:", error);
+        toast.error("Failed to load projects. Please refresh.");
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    );
 
     return () => unsubscribe();
   }, []);
 
-  const filteredProjects =
-    categoryFilter === "all"
-      ? projects
-      : projects.filter((p) => p.category === categoryFilter);
+  const applyFilters = () => {
+    let filtered = [...projects];
+
+    // Category filter
+    if (categoryFilter !== "all") {
+      filtered = filtered.filter((p) => p.category === categoryFilter);
+    }
+
+    // Budget filter
+    if (budgetFilter.length > 0) {
+      filtered = filtered.filter((p) => budgetFilter.includes(p.budgetRange));
+    }
+
+    // City filter (client-side)
+    if (cityFilter.trim()) {
+      filtered = filtered.filter((p) =>
+        p.city.toLowerCase().includes(cityFilter.toLowerCase())
+      );
+    }
+
+    // Sorting
+    if (sortBy === "oldest") {
+      filtered.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    } else if (sortBy === "budget_high") {
+      const budgetOrder: Record<string, number> = {
+        under_5000: 0, "5000_15000": 1, "15000_30000": 2,
+        "30000_50000": 3, "50000_100000": 4, "100000_250000": 5, over_250000: 6,
+      };
+      filtered.sort((a, b) => (budgetOrder[b.budgetRange] ?? 0) - (budgetOrder[a.budgetRange] ?? 0));
+    } else if (sortBy === "budget_low") {
+      const budgetOrder: Record<string, number> = {
+        under_5000: 0, "5000_15000": 1, "15000_30000": 2,
+        "30000_50000": 3, "50000_100000": 4, "100000_250000": 5, over_250000: 6,
+      };
+      filtered.sort((a, b) => (budgetOrder[a.budgetRange] ?? 0) - (budgetOrder[b.budgetRange] ?? 0));
+    }
+
+    return filtered;
+  };
+
+  const filteredProjects = applyFilters();
+
+  const budgetRanges = [
+    { value: "under_5000", label: "Under $5,000" },
+    { value: "5000_15000", label: "$5,000 – $15,000" },
+    { value: "15000_30000", label: "$15,000 – $30,000" },
+    { value: "30000_50000", label: "$30,000 – $50,000" },
+    { value: "50000_100000", label: "$50,000 – $100,000" },
+    { value: "100000_250000", label: "$100,000 – $250,000" },
+    { value: "over_250000", label: "Over $250,000" },
+  ];
 
   const isVerified = contractor?.verificationStatus === "approved";
   const creditBalance = contractor?.creditBalance ?? 0;
@@ -99,6 +156,15 @@ export default function ContractorMarketplacePage() {
     setUnlocking(confirmUnlock.id);
     try {
       await unlockProject(contractor.uid, confirmUnlock.id, confirmUnlock.creditCost);
+      await createNotification({
+        recipientUid: confirmUnlock.homeownerUid,
+        type: "project_unlocked",
+        title: "Your Project Was Viewed",
+        message: `A contractor unlocked your ${confirmUnlock.categoryName || CATEGORY_LABELS[confirmUnlock.category]} project in ${confirmUnlock.city}.`,
+        read: false,
+        createdAt: new Date().toISOString(),
+        relatedId: confirmUnlock.id,
+      });
       await refreshProfile();
       setUnlockedIds((prev) => [...prev, confirmUnlock.id]);
       toast.success("Project unlocked! You can now view full details.");
@@ -167,30 +233,114 @@ export default function ContractorMarketplacePage() {
             </div>
           )}
 
-          {/* Filter */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="flex items-center gap-3">
-              <HiFilter size={20} className="text-gray-400" />
-              <label htmlFor="categoryFilter" className="text-sm font-medium text-gray-700">
-                Filter by Category:
-              </label>
-              <select
-                id="categoryFilter"
-                value={categoryFilter}
-                onChange={(e) =>
-                  setCategoryFilter(e.target.value as ProjectCategory | "all")
-                }
-                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all duration-200"
-              >
-                <option value="all">All Categories</option>
-                {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-sm text-gray-500 ml-auto">
-                {filteredProjects.length} project{filteredProjects.length !== 1 ? "s" : ""} found
+          {/* Advanced Filters */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <HiFilter size={20} className="text-gray-400" />
+                <h3 className="font-semibold text-gray-900">Advanced Filters</h3>
+              </div>
+              {(categoryFilter !== "all" || budgetFilter.length > 0 || cityFilter) && (
+                <button
+                  onClick={() => {
+                    setCategoryFilter("all");
+                    setBudgetFilter([]);
+                    setCityFilter("");
+                  }}
+                  className="text-sm text-orange-600 hover:text-orange-700 font-medium"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Category Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Category
+                </label>
+                <select
+                  value={categoryFilter}
+                  onChange={(e) =>
+                    setCategoryFilter(e.target.value as ProjectCategory | "all")
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                >
+                  <option value="all">All Categories</option>
+                  {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Budget Range Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Budget Range
+                </label>
+                <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                  {budgetRanges.map((range) => (
+                    <label key={range.value} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={budgetFilter.includes(range.value)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setBudgetFilter([...budgetFilter, range.value]);
+                          } else {
+                            setBudgetFilter(budgetFilter.filter((b) => b !== range.value));
+                          }
+                        }}
+                        className="w-4 h-4 accent-orange-500"
+                      />
+                      <span className="text-sm text-gray-700">{range.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* City Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  City
+                </label>
+                <input
+                  type="text"
+                  value={cityFilter}
+                  onChange={(e) => setCityFilter(e.target.value)}
+                  placeholder="e.g., Toronto"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                />
+              </div>
+
+              {/* Sort Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Sort By
+                </label>
+                <select
+                  value={sortBy}
+                  onChange={(e) =>
+                    setSortBy(e.target.value as "newest" | "oldest" | "budget_high" | "budget_low")
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="budget_high">Budget: High to Low</option>
+                  <option value="budget_low">Budget: Low to High</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Results Count */}
+            <div className="flex justify-end">
+              <span className="text-sm text-gray-600">
+                <span className="font-semibold text-gray-900">{filteredProjects.length}</span> project
+                {filteredProjects.length !== 1 ? "s" : ""} found
               </span>
             </div>
           </div>
@@ -326,11 +476,7 @@ export default function ContractorMarketplacePage() {
                     {/* Card Footer */}
                     <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
                       <span className="text-xs text-gray-400">
-                        {new Date(project.createdAt).toLocaleDateString("en-CA", {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatDate(project.createdAt)}
                       </span>
                       {isUnlocked ? (
                         <Link href={`/dashboard/contractor/marketplace/${project.id}`}>

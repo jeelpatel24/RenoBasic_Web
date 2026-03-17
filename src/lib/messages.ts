@@ -1,5 +1,19 @@
 import { db } from "@/lib/firebase";
-import { ref, get, set, push, update, onValue, Unsubscribe } from "firebase/database";
+import {
+  doc,
+  setDoc,
+  collection,
+  addDoc,
+  updateDoc,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  onSnapshot,
+  Unsubscribe,
+  increment,
+  writeBatch,
+} from "firebase/firestore";
 import { Conversation, Message } from "@/types";
 
 /**
@@ -21,28 +35,24 @@ export async function getOrCreateConversation(
   projectCategory: string
 ): Promise<string> {
   const conversationId = getConversationId(contractorUid, projectId);
-  const conversationRef = ref(db, `conversations/${conversationId}`);
-  const snapshot = await get(conversationRef);
+  const conversationRef = doc(db, "conversations", conversationId);
+  const now = new Date().toISOString();
 
-  if (!snapshot.exists()) {
-    const now = new Date().toISOString();
-    const conversation: Conversation = {
-      id: conversationId,
-      homeownerUid,
-      contractorUid,
-      projectId,
-      homeownerName,
-      contractorName,
-      projectCategory,
-      lastMessage: "",
-      lastMessageTimestamp: now,
-      messageCount: 0,
-      createdAt: now,
-    };
+  const conversation: Conversation = {
+    id: conversationId,
+    homeownerUid,
+    contractorUid,
+    projectId,
+    homeownerName,
+    contractorName,
+    projectCategory,
+    lastMessage: "",
+    lastMessageTimestamp: now,
+    messageCount: 0,
+    createdAt: now,
+  };
 
-    await set(conversationRef, conversation);
-  }
-
+  await setDoc(conversationRef, conversation, { merge: true });
   return conversationId;
 }
 
@@ -55,8 +65,6 @@ export async function sendMessage(
   senderName: string,
   content: string
 ): Promise<void> {
-  const messagesRef = ref(db, `conversations/${conversationId}/messages`);
-  const newMsgRef = push(messagesRef);
   const now = new Date().toISOString();
 
   const message: Omit<Message, "id"> = {
@@ -67,17 +75,21 @@ export async function sendMessage(
     read: false,
   };
 
-  await set(newMsgRef, { ...message, id: newMsgRef.key });
+  const messagesCollectionRef = collection(
+    db,
+    "conversations",
+    conversationId,
+    "messages"
+  );
+  await addDoc(messagesCollectionRef, message);
 
   // Update conversation metadata
-  const conversationRef = ref(db, `conversations/${conversationId}`);
-  const snapshot = await get(conversationRef);
-  const currentCount = snapshot.exists() ? (snapshot.val().messageCount || 0) : 0;
-
-  await update(conversationRef, {
-    lastMessage: content.length > 80 ? content.substring(0, 80) + "..." : content,
+  const conversationRef = doc(db, "conversations", conversationId);
+  await updateDoc(conversationRef, {
+    lastMessage:
+      content.length > 80 ? content.substring(0, 80) + "..." : content,
     lastMessageTimestamp: now,
-    messageCount: currentCount + 1,
+    messageCount: increment(1),
   });
 }
 
@@ -88,23 +100,28 @@ export async function markMessagesAsRead(
   conversationId: string,
   currentUserId: string
 ): Promise<void> {
-  const messagesRef = ref(db, `conversations/${conversationId}/messages`);
-  const snapshot = await get(messagesRef);
+  const messagesCollectionRef = collection(
+    db,
+    "conversations",
+    conversationId,
+    "messages"
+  );
+  const q = query(
+    messagesCollectionRef,
+    where("senderId", "!=", currentUserId),
+    where("read", "==", false)
+  );
 
-  if (!snapshot.exists()) return;
+  const snapshot = await getDocs(q);
 
-  const updates: Record<string, boolean> = {};
-  const data = snapshot.val() as Record<string, Message>;
+  if (snapshot.empty) return;
 
-  Object.entries(data).forEach(([key, msg]) => {
-    if (msg.senderId !== currentUserId && !msg.read) {
-      updates[`conversations/${conversationId}/messages/${key}/read`] = true;
-    }
+  const batch = writeBatch(db);
+  snapshot.forEach((doc) => {
+    batch.update(doc.ref, { read: true });
   });
 
-  if (Object.keys(updates).length > 0) {
-    await update(ref(db), updates);
-  }
+  await batch.commit();
 }
 
 /**
@@ -113,35 +130,30 @@ export async function markMessagesAsRead(
 export function subscribeToConversations(
   userId: string,
   role: "homeowner" | "contractor",
-  callback: (conversations: Conversation[]) => void
+  callback: (conversations: Conversation[]) => void,
+  onError?: (error: Error) => void
 ): Unsubscribe {
-  const conversationsRef = ref(db, "conversations");
-  return onValue(conversationsRef, (snapshot) => {
-    if (!snapshot.exists()) {
-      callback([]);
-      return;
+  const matchField = role === "homeowner" ? "homeownerUid" : "contractorUid";
+  const q = query(
+    collection(db, "conversations"),
+    where(matchField, "==", userId),
+    orderBy("lastMessageTimestamp", "desc")
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const conversations: Conversation[] = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      } as Conversation));
+      callback(conversations);
+    },
+    (error) => {
+      console.error("Error fetching conversations:", error);
+      if (onError) onError(error);
     }
-
-    const data = snapshot.val() as Record<string, Conversation & { messages?: Record<string, Message> }>;
-    const conversations: Conversation[] = [];
-
-    Object.entries(data).forEach(([id, conv]) => {
-      const matchField = role === "homeowner" ? "homeownerUid" : "contractorUid";
-      if (conv[matchField] === userId) {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { messages, ...conversationData } = conv;
-        conversations.push({ ...conversationData, id });
-      }
-    });
-
-    conversations.sort(
-      (a, b) =>
-        new Date(b.lastMessageTimestamp).getTime() -
-        new Date(a.lastMessageTimestamp).getTime()
-    );
-
-    callback(conversations);
-  });
+  );
 }
 
 /**
@@ -149,27 +161,30 @@ export function subscribeToConversations(
  */
 export function subscribeToMessages(
   conversationId: string,
-  callback: (messages: Message[]) => void
+  callback: (messages: Message[]) => void,
+  onError?: (error: Error) => void
 ): Unsubscribe {
-  const messagesRef = ref(db, `conversations/${conversationId}/messages`);
-  return onValue(messagesRef, (snapshot) => {
-    if (!snapshot.exists()) {
-      callback([]);
-      return;
+  const messagesCollectionRef = collection(
+    db,
+    "conversations",
+    conversationId,
+    "messages"
+  );
+  const q = query(messagesCollectionRef, orderBy("timestamp", "asc"));
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const messages: Message[] = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      } as Message));
+      callback(messages);
+    },
+    (error) => {
+      console.error("Error fetching messages:", error);
+      if (onError) onError(error);
     }
-
-    const data = snapshot.val() as Record<string, Message>;
-    const messages: Message[] = Object.entries(data).map(([key, msg]) => ({
-      ...msg,
-      id: key,
-    }));
-
-    messages.sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-
-    callback(messages);
-  });
+  );
 }
 

@@ -1,13 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import Button from "@/components/ui/Button";
 import { Bid } from "@/types";
-import { getHomeownerBids, updateBidStatus } from "@/lib/bids";
+import { updateBidStatus } from "@/lib/bids";
+import { createNotification } from "@/lib/notifications";
 import toast from "react-hot-toast";
+import { formatDate } from "@/lib/utils";
 import {
   HiCollection,
   HiClock,
@@ -24,28 +28,38 @@ export default function HomeownerBidsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "submitted" | "accepted" | "rejected">("all");
 
-  const fetchBids = useCallback(async () => {
+  useEffect(() => {
     if (!userProfile) return;
-    try {
-      const data = await getHomeownerBids(userProfile.uid);
-      setBids(data);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
+    const q = query(
+      collection(db, "bids"),
+      where("homeownerUid", "==", userProfile.uid),
+      orderBy("submittedAt", "desc")
+    );
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        setBids(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Bid)));
+        setLoading(false);
+      },
+      (error) => { console.error("Error loading bids:", error); setLoading(false); }
+    );
+    return () => unsub();
   }, [userProfile]);
 
-  useEffect(() => {
-    fetchBids();
-  }, [fetchBids]);
-
-  const handleStatusUpdate = async (bidId: string, status: "accepted" | "rejected") => {
-    setActionLoading(bidId);
+  const handleStatusUpdate = async (bid: Bid, status: "accepted" | "rejected") => {
+    setActionLoading(bid.id);
     try {
-      await updateBidStatus(bidId, status);
+      await updateBidStatus(bid.id, status);
+      await createNotification({
+        recipientUid: bid.contractorUid,
+        type: status === "accepted" ? "bid_accepted" : "bid_rejected",
+        title: status === "accepted" ? "Bid Accepted!" : "Bid Rejected",
+        message: `Your bid for "${bid.projectCategory}" has been ${status}.`,
+        read: false,
+        createdAt: new Date().toISOString(),
+        relatedId: bid.projectId,
+      });
       toast.success(`Bid ${status} successfully!`);
-      await fetchBids();
     } catch {
       toast.error("Failed to update bid status.");
     } finally {
@@ -112,7 +126,7 @@ export default function HomeownerBidsPage() {
                         <span className="bg-orange-100 text-orange-700 text-xs font-medium px-2.5 py-1 rounded-full">
                           {bid.projectCategory}
                         </span>
-                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusStyles[bid.status]}`}>
+                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${statusStyles[bid.status] ?? "bg-gray-100 text-gray-700"}`}>
                           {bid.status.charAt(0).toUpperCase() + bid.status.slice(1)}
                         </span>
                       </div>
@@ -122,11 +136,7 @@ export default function HomeownerBidsPage() {
                       </div>
                     </div>
                     <p className="text-xs text-gray-400">
-                      {new Date(bid.submittedAt).toLocaleDateString("en-CA", {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                      })}
+                      {formatDate(bid.submittedAt)}
                     </p>
                   </div>
 
@@ -135,12 +145,12 @@ export default function HomeownerBidsPage() {
                     {bid.itemizedCosts.map((item, i) => (
                       <div key={i} className="flex justify-between py-1">
                         <span className="text-gray-600">{item.description}</span>
-                        <span className="text-gray-900 font-medium">${item.cost.toLocaleString()}</span>
+                        <span className="text-gray-900 font-medium">${(Number(item.cost) || 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
                       </div>
                     ))}
                     <div className="flex justify-between py-1 border-t border-gray-200 mt-1 pt-2 font-bold">
                       <span className="text-gray-900">Total</span>
-                      <span className="text-orange-600">${bid.totalCost.toLocaleString()}</span>
+                      <span className="text-orange-600">${(Number(bid.totalCost) || 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
                     </div>
                   </div>
 
@@ -151,7 +161,7 @@ export default function HomeownerBidsPage() {
                     </span>
                     <span className="flex items-center gap-1">
                       <HiCurrencyDollar size={16} className="text-gray-400" />
-                      ${bid.totalCost.toLocaleString()}
+                      ${(Number(bid.totalCost) || 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
                     </span>
                   </div>
 
@@ -163,7 +173,7 @@ export default function HomeownerBidsPage() {
                     <div className="flex gap-3 pt-2">
                       <Button
                         size="sm"
-                        onClick={() => handleStatusUpdate(bid.id, "accepted")}
+                        onClick={() => handleStatusUpdate(bid, "accepted")}
                         loading={actionLoading === bid.id}
                         className="!bg-green-600 hover:!bg-green-700"
                       >
@@ -173,7 +183,7 @@ export default function HomeownerBidsPage() {
                       <Button
                         size="sm"
                         variant="danger"
-                        onClick={() => handleStatusUpdate(bid.id, "rejected")}
+                        onClick={() => handleStatusUpdate(bid, "rejected")}
                         loading={actionLoading === bid.id}
                       >
                         <HiXCircle size={16} className="mr-1" />

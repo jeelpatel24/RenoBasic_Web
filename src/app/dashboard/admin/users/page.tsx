@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, onValue } from "firebase/database";
+import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { AppUser } from "@/types";
+import { formatDate } from "@/lib/utils";
 import { HiUsers, HiMail, HiPhone, HiSearch, HiX } from "react-icons/hi";
 
 export default function AdminUsersPage() {
@@ -15,17 +16,18 @@ export default function AdminUsersPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    const usersRef = ref(db, "users");
-    const unsub = onValue(usersRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const allUsers: AppUser[] = Object.entries(data).map(
-          ([uid, value]) => ({ ...(value as Record<string, unknown>), uid } as unknown as AppUser)
-        );
+    const unsub = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const allUsers = snapshot.docs.map((doc) => ({
+          ...doc.data(),
+          uid: doc.id,
+        } as AppUser));
         setUsers(allUsers);
-      }
-      setLoading(false);
-    });
+        setLoading(false);
+      },
+      (error) => { console.error("Error loading users:", error); setLoading(false); }
+    );
     return () => unsub();
   }, []);
 
@@ -193,7 +195,7 @@ export default function AdminUsersPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-500">
-                        {new Date(user.createdAt).toLocaleDateString("en-CA")}
+                        {formatDate(user.createdAt)}
                       </td>
                     </tr>
                   ))}

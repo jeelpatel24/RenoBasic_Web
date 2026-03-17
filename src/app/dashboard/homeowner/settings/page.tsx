@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, set, get } from "firebase/database";
+import { doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -9,6 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import toast from "react-hot-toast";
+import { formatDate } from "@/lib/utils";
 import {
   HiCog,
   HiUser,
@@ -52,7 +53,14 @@ export default function HomeownerSettingsPage() {
     const newErrors: Record<string, string> = {};
 
     if (!form.fullName.trim()) newErrors.fullName = "Full name is required.";
-    if (!form.phone.trim()) newErrors.phone = "Phone number is required.";
+    if (!form.phone.trim()) {
+      newErrors.phone = "Phone number is required.";
+    } else {
+      const digits = form.phone.replace(/\D/g, "");
+      if (digits.length !== 10 && !(digits.length === 11 && digits[0] === "1")) {
+        newErrors.phone = "Enter a valid 10-digit phone number.";
+      }
+    }
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -61,12 +69,7 @@ export default function HomeownerSettingsPage() {
 
     setLoading(true);
     try {
-      const userRef = ref(db, `users/${userProfile!.uid}`);
-      const snapshot = await get(userRef);
-      const existingData = snapshot.val();
-
-      await set(userRef, {
-        ...existingData,
+      await updateDoc(doc(db, "users", userProfile!.uid), {
         fullName: form.fullName.trim(),
         phone: form.phone.trim(),
         updatedAt: new Date().toISOString(),
@@ -83,13 +86,7 @@ export default function HomeownerSettingsPage() {
   };
 
   const isEmailVerified = firebaseUser?.emailVerified ?? false;
-  const memberSince = userProfile?.createdAt
-    ? new Date(userProfile.createdAt).toLocaleDateString("en-CA", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
-    : "--";
+  const memberSince = userProfile?.createdAt ? formatDate(userProfile.createdAt) : "--";
 
   if (initialLoading) {
     return (

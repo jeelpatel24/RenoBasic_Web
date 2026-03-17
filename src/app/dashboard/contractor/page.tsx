@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ref, onValue } from "firebase/database";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import Link from "next/link";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
@@ -56,41 +56,35 @@ export default function ContractorDashboard() {
     const uid = contractor.uid;
 
     // Real-time listener for unlocks
-    const unsubUnlocks = onValue(ref(db, "unlocks"), (snapshot) => {
-      let unlocked = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { contractorUid: string }>).forEach((u) => {
-          if (u.contractorUid === uid) unlocked++;
-        });
-      }
-      setStats((prev) => ({ ...prev, unlocked }));
-    });
+    const unsubUnlocks = onSnapshot(
+      query(collection(db, "unlocks"), where("contractorUid", "==", uid)),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, unlocked: snapshot.size }));
+      },
+      (error) => { console.error("Error loading unlocks:", error); }
+    );
 
     // Real-time listener for conversations
-    const unsubConvs = onValue(ref(db, "conversations"), (snapshot) => {
-      let conversations = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { contractorUid: string }>).forEach((c) => {
-          if (c.contractorUid === uid) conversations++;
-        });
-      }
-      setStats((prev) => ({ ...prev, conversations }));
-    });
+    const unsubConvs = onSnapshot(
+      query(collection(db, "conversations"), where("contractorUid", "==", uid)),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, conversations: snapshot.size }));
+      },
+      (error) => { console.error("Error loading conversations:", error); }
+    );
 
     // Real-time listener for bids
-    const unsubBids = onValue(ref(db, "bids"), (snapshot) => {
-      let bids = 0;
-      let acceptedBids = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { contractorUid: string; status: string }>).forEach((b) => {
-          if (b.contractorUid === uid) {
-            bids++;
-            if (b.status === "accepted") acceptedBids++;
-          }
+    const unsubBids = onSnapshot(
+      query(collection(db, "bids"), where("contractorUid", "==", uid)),
+      (snapshot) => {
+        let acceptedBids = 0;
+        snapshot.forEach((doc) => {
+          if (doc.data().status === "accepted") acceptedBids++;
         });
-      }
-      setStats((prev) => ({ ...prev, bids, acceptedBids }));
-    });
+        setStats((prev) => ({ ...prev, bids: snapshot.size, acceptedBids }));
+      },
+      (error) => { console.error("Error loading bids:", error); }
+    );
 
     return () => {
       unsubUnlocks();
@@ -115,6 +109,20 @@ export default function ContractorDashboard() {
 
           {/* Verification Banner */}
           {contractor && <VerificationBanner status={contractor.verificationStatus} />}
+
+          {/* Low Credit Balance Warning */}
+          {contractor && contractor.verificationStatus === "approved" && (contractor.creditBalance ?? 0) <= 3 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+              <HiExclamation size={20} className="text-red-500 shrink-0" />
+              <p className="text-sm text-red-700 font-medium">
+                Low credit balance ({contractor.creditBalance ?? 0} credits remaining).{" "}
+                <a href="/dashboard/contractor/credits" className="underline font-semibold hover:text-red-800">
+                  Buy more credits
+                </a>{" "}
+                to continue unlocking projects.
+              </p>
+            </div>
+          )}
 
           {/* Stats Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">

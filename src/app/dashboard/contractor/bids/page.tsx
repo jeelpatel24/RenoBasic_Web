@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 import { Bid } from "@/types";
-import { getContractorBids } from "@/lib/bids";
+import { formatDate } from "@/lib/utils";
 import {
   HiCollection,
   HiClock,
@@ -24,10 +26,20 @@ export default function ContractorBidsPage() {
 
   useEffect(() => {
     if (!userProfile) return;
-    getContractorBids(userProfile.uid)
-      .then(setBids)
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    const q = query(
+      collection(db, "bids"),
+      where("contractorUid", "==", userProfile.uid),
+      orderBy("submittedAt", "desc")
+    );
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        setBids(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Bid)));
+        setLoading(false);
+      },
+      (error) => { console.error("Error loading bids:", error); setLoading(false); }
+    );
+    return () => unsub();
   }, [userProfile]);
 
   const filteredBids = filter === "all" ? bids : bids.filter((b) => b.status === filter);
@@ -105,7 +117,7 @@ export default function ContractorBidsPage() {
                       <div className="flex flex-wrap gap-4 mt-3 text-sm text-gray-600">
                         <span className="flex items-center gap-1">
                           <HiCurrencyDollar size={16} className="text-gray-400" />
-                          ${bid.totalCost.toLocaleString()}
+                          ${bid.totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
                         </span>
                         <span className="flex items-center gap-1">
                           <HiClock size={16} className="text-gray-400" />
@@ -113,7 +125,7 @@ export default function ContractorBidsPage() {
                         </span>
                       </div>
                       <p className="text-xs text-gray-400 mt-2">
-                        Submitted {new Date(bid.submittedAt).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" })}
+                        Submitted {formatDate(bid.submittedAt)}
                       </p>
                     </div>
                     <HiArrowRight size={18} className="text-gray-400 shrink-0 mt-1" />

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { ref, get } from "firebase/database";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -19,7 +19,9 @@ import {
   PropertyType,
 } from "@/types";
 import { getBidsForProject, updateBidStatus } from "@/lib/bids";
+import { createNotification } from "@/lib/notifications";
 import toast from "react-hot-toast";
+// import { formatDate } from "@/lib/utils";
 import {
   HiArrowLeft,
   HiLocationMarker,
@@ -39,14 +41,16 @@ export default function HomeownerProjectDetailPage() {
   const [bids, setBids] = useState<Bid[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [showBidComparison, setShowBidComparison] = useState(false);
 
   useEffect(() => {
     if (!projectId) return;
     const fetchData = async () => {
       try {
-        const snap = await get(ref(db, `projects/${projectId}`));
+        const snap = await getDoc(doc(db, "projects", projectId));
         if (snap.exists()) {
-          setProject({ ...(snap.val() as Project), id: projectId });
+          setProject({ ...snap.data(), id: projectId } as Project);
         }
         const projectBids = await getBidsForProject(projectId);
         setBids(projectBids);
@@ -59,10 +63,19 @@ export default function HomeownerProjectDetailPage() {
     fetchData();
   }, [projectId]);
 
-  const handleBidStatus = async (bidId: string, status: "accepted" | "rejected") => {
-    setActionLoading(bidId);
+  const handleBidStatus = async (bid: Bid, status: "accepted" | "rejected") => {
+    setActionLoading(bid.id);
     try {
-      await updateBidStatus(bidId, status);
+      await updateBidStatus(bid.id, status);
+      await createNotification({
+        recipientUid: bid.contractorUid,
+        type: status === "accepted" ? "bid_accepted" : "bid_rejected",
+        title: status === "accepted" ? "Bid Accepted!" : "Bid Rejected",
+        message: `Your bid for "${bid.projectCategory}" has been ${status}.`,
+        read: false,
+        createdAt: new Date().toISOString(),
+        relatedId: projectId,
+      });
       toast.success(`Bid ${status}!`);
       const updated = await getBidsForProject(projectId);
       setBids(updated);
@@ -70,6 +83,25 @@ export default function HomeownerProjectDetailPage() {
       toast.error("Failed to update bid.");
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const handleStatusChange = async (newStatus: "in_progress" | "completed") => {
+    if (!project) return;
+    setStatusLoading(true);
+    try {
+      const projectRef = doc(db, "projects", projectId);
+      await updateDoc(projectRef, {
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      setProject({ ...project, status: newStatus, updatedAt: new Date().toISOString() });
+      toast.success(`Project status updated to ${newStatus}`);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to update project status");
+    } finally {
+      setStatusLoading(false);
     }
   };
 
@@ -237,15 +269,121 @@ export default function HomeownerProjectDetailPage() {
                     <p className="text-gray-700 text-sm">{project.privateDetails.buildingRestrictions}</p>
                   </div>
                 )}
+
+                {/* Project Photos */}
+                {project.privateDetails.photos && project.privateDetails.photos.length > 0 && (
+                  <div className="mt-4">
+                    <h3 className="text-sm font-medium text-gray-900 mb-2">Project Photos</h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {project.privateDetails.photos.map((url, idx) => (
+                        <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={url}
+                            alt={`Project photo ${idx + 1}`}
+                            className="w-full h-32 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
 
+          {/* Project Status Pipeline */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Project Status</h2>
+            <div className="space-y-4">
+              {/* Status Progress Bar */}
+              <div className="flex items-center justify-between">
+                {["open", "in_progress", "completed", "closed"].map((status, idx) => (
+                  <div key={status} className="flex-1">
+                    <div
+                      className={`h-2 rounded-full transition-colors ${
+                        ["open", "in_progress", "completed", "closed"].indexOf(project?.status || "open") >= idx
+                          ? "bg-orange-500"
+                          : "bg-gray-200"
+                      }`}
+                    />
+                    <p className="text-xs text-gray-600 mt-1 capitalize text-center">{status.replace("_", " ")}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Status Actions */}
+              <div className="flex gap-3">
+                {project?.status === "open" && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleStatusChange("in_progress")}
+                    loading={statusLoading}
+                  >
+                    Start Work
+                  </Button>
+                )}
+                {project?.status === "in_progress" && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleStatusChange("completed")}
+                    loading={statusLoading}
+                  >
+                    Mark Complete
+                  </Button>
+                )}
+                {(project?.status === "open" || project?.status === "in_progress") && (
+                  <p className="text-xs text-gray-500 flex items-center">Current: {project?.status.replace("_", " ")}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Bids Section */}
           <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">
-              Bids Received ({bids.length})
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-900">
+                Bids Received ({bids.length})
+              </h2>
+              {bids.filter((b) => b.status === "submitted").length >= 2 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowBidComparison(!showBidComparison)}
+                >
+                  {showBidComparison ? "Hide Comparison" : "Compare Bids"}
+                </Button>
+              )}
+            </div>
+
+            {showBidComparison && bids.filter((b) => b.status === "submitted").length >= 2 && (
+              <div className="mb-6 overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-200">
+                      <th className="px-4 py-3 text-left font-semibold text-gray-900">Contractor</th>
+                      <th className="px-4 py-3 text-left font-semibold text-gray-900">Total Cost</th>
+                      <th className="px-4 py-3 text-left font-semibold text-gray-900">Timeline</th>
+                      <th className="px-4 py-3 text-left font-semibold text-gray-900">Line Items</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bids
+                      .filter((b) => b.status === "submitted")
+                      .map((bid) => (
+                        <tr key={bid.id} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium text-gray-900">{bid.contractorName}</td>
+                          <td className="px-4 py-3 font-bold text-orange-600">${bid.totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</td>
+                          <td className="px-4 py-3 text-gray-600">{bid.estimatedTimeline}</td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {bid.itemizedCosts.map((item) => item.description).join(", ")}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {bids.length === 0 ? (
               <div className="text-center py-8 text-gray-400">
@@ -273,14 +411,14 @@ export default function HomeownerProjectDetailPage() {
                           {bid.status}
                         </span>
                       </div>
-                      <p className="text-xl font-bold text-orange-600">${bid.totalCost.toLocaleString()}</p>
+                      <p className="text-xl font-bold text-orange-600">${bid.totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</p>
                     </div>
 
                     <div className="bg-gray-50 rounded-lg p-3 text-sm mb-3">
                       {bid.itemizedCosts.map((item, i) => (
                         <div key={i} className="flex justify-between py-1">
                           <span className="text-gray-600">{item.description}</span>
-                          <span className="text-gray-900">${item.cost.toLocaleString()}</span>
+                          <span className="text-gray-900">${item.cost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
                         </div>
                       ))}
                     </div>
@@ -297,7 +435,7 @@ export default function HomeownerProjectDetailPage() {
                       <div className="flex gap-3">
                         <Button
                           size="sm"
-                          onClick={() => handleBidStatus(bid.id, "accepted")}
+                          onClick={() => handleBidStatus(bid, "accepted")}
                           loading={actionLoading === bid.id}
                           className="!bg-green-600 hover:!bg-green-700"
                         >
@@ -306,7 +444,7 @@ export default function HomeownerProjectDetailPage() {
                         <Button
                           size="sm"
                           variant="danger"
-                          onClick={() => handleBidStatus(bid.id, "rejected")}
+                          onClick={() => handleBidStatus(bid, "rejected")}
                           loading={actionLoading === bid.id}
                         >
                           <HiXCircle size={16} className="mr-1" /> Reject

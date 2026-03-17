@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { logoutUser } from "@/lib/auth";
 import { HiMenu, HiX, HiHome, HiClipboardList, HiChat, HiCreditCard, HiChartBar, HiCog, HiLogout, HiUsers, HiShieldCheck, HiCollection } from "react-icons/hi";
 import { UserRole } from "@/types";
+import { NotificationBell } from "@/components/ui/NotificationBell";
 
 interface NavItem {
   label: string;
@@ -62,7 +63,7 @@ export default function DashboardLayout({ children, role }: { children: ReactNod
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar - Desktop */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 bg-white border-r border-gray-200">
-        <div className="p-6 border-b border-gray-100">
+        <div className="p-6 border-b border-gray-100 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-lg">R</span>
@@ -71,6 +72,7 @@ export default function DashboardLayout({ children, role }: { children: ReactNod
               Reno<span className="text-orange-500">Basics</span>
             </span>
           </Link>
+          <NotificationBell align="left" />
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
@@ -157,13 +159,16 @@ export default function DashboardLayout({ children, role }: { children: ReactNod
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-screen">
         {/* Top Bar (Mobile) */}
-        <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-4">
-          <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-600">
-            <HiMenu size={24} />
-          </button>
-          <span className="text-lg font-bold text-gray-900">
-            Reno<span className="text-orange-500">Basics</span>
-          </span>
+        <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-600">
+              <HiMenu size={24} />
+            </button>
+            <span className="text-lg font-bold text-gray-900">
+              Reno<span className="text-orange-500">Basics</span>
+            </span>
+          </div>
+          <NotificationBell />
         </header>
 
         <main className="flex-1 p-6 lg:p-8">{children}</main>

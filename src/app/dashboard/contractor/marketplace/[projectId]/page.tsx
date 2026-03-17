@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ref, get } from "firebase/database";
+import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -23,7 +23,9 @@ import {
 import { getProjectPrivateDetails } from "@/lib/projects";
 import { getOrCreateConversation } from "@/lib/messages";
 import { submitBid } from "@/lib/bids";
+import { createNotification } from "@/lib/notifications";
 import toast from "react-hot-toast";
+// import { formatDate } from "@/lib/utils";
 import {
   HiArrowLeft,
   HiLocationMarker,
@@ -59,15 +61,19 @@ export default function ContractorProjectDetailPage() {
   const [bidNotes, setBidNotes] = useState("");
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !contractor) return;
     const fetchProject = async () => {
       try {
-        const snap = await get(ref(db, `projects/${projectId}`));
+        const snap = await getDoc(doc(db, "projects", projectId));
         if (snap.exists()) {
-          const data = snap.val() as Project;
+          const data = snap.data() as Project;
           setProject({ ...data, id: projectId });
-          const details = await getProjectPrivateDetails(projectId);
-          setPrivateDetails(details);
+          // Only load private details if contractor has unlocked this project
+          const unlockSnap = await getDoc(doc(db, "unlocks", `${contractor.uid}_${projectId}`));
+          if (unlockSnap.exists()) {
+            const details = await getProjectPrivateDetails(projectId);
+            setPrivateDetails(details);
+          }
         }
       } catch (error) {
         console.error("Error fetching project:", error);
@@ -77,7 +83,7 @@ export default function ContractorProjectDetailPage() {
       }
     };
     fetchProject();
-  }, [projectId]);
+  }, [projectId, contractor]);
 
   const handleStartConversation = async () => {
     if (!contractor || !project || !privateDetails) return;
@@ -131,6 +137,15 @@ export default function ContractorProjectDetailPage() {
         totalCost,
         estimatedTimeline: bidTimeline,
         notes: bidNotes,
+      });
+      await createNotification({
+        recipientUid: project.homeownerUid,
+        type: "bid_received",
+        title: "New Bid Received",
+        message: `${contractor.fullName} submitted a bid for your ${project.categoryName || CATEGORY_LABELS[project.category]} project.`,
+        read: false,
+        createdAt: new Date().toISOString(),
+        relatedId: project.id,
       });
       toast.success("Bid submitted successfully!");
       setShowBidForm(false);
@@ -335,6 +350,25 @@ export default function ContractorProjectDetailPage() {
                 </div>
               </div>
 
+              {/* Project Photos */}
+              {privateDetails.photos && privateDetails.photos.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-200 p-6">
+                  <h2 className="text-lg font-bold text-gray-900 mb-4">Project Photos</h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {privateDetails.photos.map((url, idx) => (
+                      <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={`Project photo ${idx + 1}`}
+                          className="w-full h-32 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Homeowner Contact */}
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <h2 className="text-lg font-bold text-gray-900 mb-4">Homeowner Contact</h2>
@@ -411,7 +445,7 @@ export default function ContractorProjectDetailPage() {
 
                   <div className="bg-orange-50 rounded-lg p-3">
                     <p className="text-sm font-medium text-orange-700">
-                      Total: ${totalCost.toLocaleString()}
+                      Total: ${totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
                     </p>
                   </div>
 
@@ -440,7 +474,7 @@ export default function ContractorProjectDetailPage() {
                   </div>
 
                   <Button fullWidth loading={bidLoading} onClick={handleSubmitBid}>
-                    Submit Bid (${totalCost.toLocaleString()})
+                    Submit Bid (${totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")})
                   </Button>
                 </div>
               )}

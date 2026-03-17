@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, onValue } from "firebase/database";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { ContractorUser } from "@/types";
+import {
+  PieChart, Pie, Cell, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
+} from "recharts";
 import {
   HiChartBar,
   HiCreditCard,
@@ -21,6 +25,7 @@ export default function ContractorAnalyticsPage() {
   const [stats, setStats] = useState({
     totalBids: 0,
     acceptedBids: 0,
+    rejectedBids: 0,
     unlockedProjects: 0,
     creditsSpent: 0,
   });
@@ -36,46 +41,47 @@ export default function ContractorAnalyticsPage() {
     };
 
     // Real-time bids listener
-    const unsubBids = onValue(ref(db, "bids"), (snapshot) => {
-      let totalBids = 0;
-      let acceptedBids = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { contractorUid: string; status: string }>).forEach((b) => {
-          if (b.contractorUid === uid) {
-            totalBids++;
-            if (b.status === "accepted") acceptedBids++;
-          }
+    const unsubBids = onSnapshot(
+      query(collection(db, "bids"), where("contractorUid", "==", uid)),
+      (snapshot) => {
+        let accepted = 0;
+        let rejected = 0;
+        snapshot.forEach((doc) => {
+          const s = doc.data().status;
+          if (s === "accepted") accepted++;
+          else if (s === "rejected") rejected++;
         });
-      }
-      setStats((prev) => ({ ...prev, totalBids, acceptedBids }));
-      checkLoaded();
-    });
+        setStats((prev) => ({ ...prev, totalBids: snapshot.size, acceptedBids: accepted, rejectedBids: rejected }));
+        checkLoaded();
+      },
+      (error) => { console.error("Error loading bids:", error); checkLoaded(); }
+    );
 
     // Real-time unlocks listener
-    const unsubUnlocks = onValue(ref(db, "unlocks"), (snapshot) => {
-      let unlockedProjects = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { contractorUid: string }>).forEach((u) => {
-          if (u.contractorUid === uid) unlockedProjects++;
-        });
-      }
-      setStats((prev) => ({ ...prev, unlockedProjects }));
-      checkLoaded();
-    });
+    const unsubUnlocks = onSnapshot(
+      query(collection(db, "unlocks"), where("contractorUid", "==", uid)),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, unlockedProjects: snapshot.size }));
+        checkLoaded();
+      },
+      (error) => { console.error("Error loading unlocks:", error); checkLoaded(); }
+    );
 
     // Real-time transactions listener
-    const unsubTx = onValue(ref(db, "transactions"), (snapshot) => {
-      let creditsSpent = 0;
-      if (snapshot.exists()) {
-        Object.values(snapshot.val() as Record<string, { uid?: string; contractorUid?: string; type: string; creditAmount?: number; amount?: number }>).forEach((t) => {
-          if ((t.uid === uid || t.contractorUid === uid) && t.type === "unlock") {
-            creditsSpent += Math.abs(t.creditAmount || t.amount || 0);
+    const unsubTx = onSnapshot(
+      query(collection(db, "transactions"), where("contractorUid", "==", uid)),
+      (snapshot) => {
+        let creditsSpent = 0;
+        snapshot.forEach((doc) => {
+          if (doc.data().type === "unlock") {
+            creditsSpent += Math.abs(doc.data().creditAmount || 0);
           }
         });
-      }
-      setStats((prev) => ({ ...prev, creditsSpent }));
-      checkLoaded();
-    });
+        setStats((prev) => ({ ...prev, creditsSpent }));
+        checkLoaded();
+      },
+      (error) => { console.error("Error loading transactions:", error); checkLoaded(); }
+    );
 
     return () => {
       unsubBids();
@@ -140,14 +146,64 @@ export default function ContractorAnalyticsPage() {
                 </div>
               )}
 
+              {/* Charts */}
               <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center gap-3 mb-6">
                   <HiChartBar size={24} className="text-orange-500" />
                   <h2 className="text-lg font-bold text-gray-900">Detailed Reports</h2>
                 </div>
-                <p className="text-gray-500 text-sm">
-                  Revenue charts, bid success rates, and detailed reports coming in Iteration 2.
-                </p>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Bid Outcome Pie Chart */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-4 text-center">Bid Outcomes</h3>
+                    {stats.totalBids > 0 ? (() => {
+                      const pending = Math.max(0, stats.totalBids - stats.acceptedBids - stats.rejectedBids);
+                      const data = [
+                        { name: "Accepted", value: stats.acceptedBids, color: "#22c55e" },
+                        { name: "Pending", value: pending, color: "#f97316" },
+                        { name: "Rejected", value: stats.rejectedBids, color: "#ef4444" },
+                      ].filter((d) => d.value > 0);
+                      return (
+                        <ResponsiveContainer width="100%" height={240}>
+                          <PieChart>
+                            <Pie data={data} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value">
+                              {data.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
+                            </Pie>
+                            <Tooltip formatter={(v) => [`${v} bid${Number(v) !== 1 ? "s" : ""}`, ""]} />
+                            <Legend />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      );
+                    })() : (
+                      <div className="flex items-center justify-center h-60 text-gray-400 text-sm">No bid data yet</div>
+                    )}
+                  </div>
+
+                  {/* Credits Overview Bar Chart */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-4 text-center">Credits Overview</h3>
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart
+                        data={[
+                          { name: "Spent", value: stats.creditsSpent, fill: "#f97316" },
+                          { name: "Balance", value: contractor?.creditBalance ?? 0, fill: "#22c55e" },
+                        ]}
+                        margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                        <XAxis dataKey="name" tick={{ fontSize: 13 }} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                        <Tooltip formatter={(v) => [`${v} credits`, ""]} />
+                        <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                          {[{ fill: "#f97316" }, { fill: "#22c55e" }].map((e, idx) => (
+                            <Cell key={idx} fill={e.fill} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </div>
             </>
           )}

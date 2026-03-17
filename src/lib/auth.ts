@@ -6,7 +6,7 @@ import {
   sendEmailVerification,
   User,
 } from "firebase/auth";
-import { ref, set, get } from "firebase/database";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { UserRole, AppUser, ContractorUser, HomeownerUser } from "@/types";
 
@@ -29,7 +29,7 @@ export async function registerHomeowner(
     updatedAt: new Date().toISOString(),
   };
 
-  await set(ref(db, `users/${user.uid}`), userData);
+  await setDoc(doc(db, "users", user.uid), userData);
   await sendEmailVerification(user);
 
   return user;
@@ -63,7 +63,7 @@ export async function registerContractor(
     updatedAt: new Date().toISOString(),
   };
 
-  await set(ref(db, `users/${user.uid}`), userData);
+  await setDoc(doc(db, "users", user.uid), userData);
   await sendEmailVerification(user);
 
   return user;
@@ -73,12 +73,12 @@ export async function loginUser(email: string, password: string): Promise<AppUse
   const userCredential = await signInWithEmailAndPassword(auth, email, password);
   const user = userCredential.user;
 
-  const snapshot = await get(ref(db, `users/${user.uid}`));
-  if (!snapshot.exists()) {
+  const docSnapshot = await getDoc(doc(db, "users", user.uid));
+  if (!docSnapshot.exists()) {
     throw new Error("User profile not found in database.");
   }
 
-  return snapshot.val() as AppUser;
+  return docSnapshot.data() as AppUser;
 }
 
 export async function logoutUser(): Promise<void> {
@@ -90,9 +90,9 @@ export async function resetPassword(email: string): Promise<void> {
 }
 
 export async function getUserProfile(uid: string): Promise<AppUser | null> {
-  const snapshot = await get(ref(db, `users/${uid}`));
-  if (!snapshot.exists()) return null;
-  return snapshot.val() as AppUser;
+  const docSnapshot = await getDoc(doc(db, "users", uid));
+  if (!docSnapshot.exists()) return null;
+  return docSnapshot.data() as AppUser;
 }
 
 export function getDashboardRoute(role: UserRole): string {

@@ -1,11 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, onValue } from "firebase/database";
+import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { HiChartBar, HiUsers, HiClipboardList, HiCreditCard, HiChat, HiCollection, HiShieldCheck, HiLockOpen } from "react-icons/hi";
+import {
+  PieChart, Pie, Cell, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
+} from "recharts";
 
 export default function AdminAnalyticsPage() {
   const [stats, setStats] = useState({
@@ -33,9 +37,9 @@ export default function AdminAnalyticsPage() {
     };
 
     // Real-time users
-    const unsubUsers = onValue(ref(db, "users"), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val() as Record<string, Record<string, unknown>>;
+    const unsubUsers = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
         let homeowners = 0;
         let contractors = 0;
         let admins = 0;
@@ -43,7 +47,8 @@ export default function AdminAnalyticsPage() {
         let pending = 0;
         let totalCredits = 0;
 
-        Object.values(data).forEach((u) => {
+        snapshot.forEach((doc) => {
+          const u = doc.data();
           if (u.role === "homeowner") homeowners++;
           else if (u.role === "contractor") {
             contractors++;
@@ -63,51 +68,56 @@ export default function AdminAnalyticsPage() {
           pendingContractors: pending,
           totalCreditsInCirculation: totalCredits,
         }));
-      }
-      checkLoaded();
-    });
+        checkLoaded();
+      },
+      (error) => { console.error("Error fetching users:", error); checkLoaded(); }
+    );
 
     // Real-time projects
-    const unsubProjects = onValue(ref(db, "projects"), (snapshot) => {
-      setStats((prev) => ({
-        ...prev,
-        projects: snapshot.exists() ? Object.keys(snapshot.val() as object).length : 0,
-      }));
-      checkLoaded();
-    });
+    const unsubProjects = onSnapshot(
+      collection(db, "projects"),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, projects: snapshot.size }));
+        checkLoaded();
+      },
+      (error) => { console.error("Error fetching projects:", error); checkLoaded(); }
+    );
 
     // Real-time bids
-    const unsubBids = onValue(ref(db, "bids"), (snapshot) => {
-      let total = 0;
-      let accepted = 0;
-      if (snapshot.exists()) {
-        const data = snapshot.val() as Record<string, { status?: string }>;
-        Object.values(data).forEach((b) => {
+    const unsubBids = onSnapshot(
+      collection(db, "bids"),
+      (snapshot) => {
+        let total = 0;
+        let accepted = 0;
+        snapshot.forEach((doc) => {
           total++;
-          if (b.status === "accepted") accepted++;
+          if (doc.data().status === "accepted") accepted++;
         });
-      }
-      setStats((prev) => ({ ...prev, bids: total, acceptedBids: accepted }));
-      checkLoaded();
-    });
+        setStats((prev) => ({ ...prev, bids: total, acceptedBids: accepted }));
+        checkLoaded();
+      },
+      (error) => { console.error("Error fetching bids:", error); checkLoaded(); }
+    );
 
     // Real-time conversations
-    const unsubConvs = onValue(ref(db, "conversations"), (snapshot) => {
-      setStats((prev) => ({
-        ...prev,
-        conversations: snapshot.exists() ? Object.keys(snapshot.val() as object).length : 0,
-      }));
-      checkLoaded();
-    });
+    const unsubConvs = onSnapshot(
+      collection(db, "conversations"),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, conversations: snapshot.size }));
+        checkLoaded();
+      },
+      (error) => { console.error("Error fetching conversations:", error); checkLoaded(); }
+    );
 
-    // Real-time unlocks & transactions
-    const unsubUnlocks = onValue(ref(db, "unlocks"), (snapshot) => {
-      setStats((prev) => ({
-        ...prev,
-        totalUnlocks: snapshot.exists() ? Object.keys(snapshot.val() as object).length : 0,
-      }));
-      checkLoaded();
-    });
+    // Real-time unlocks
+    const unsubUnlocks = onSnapshot(
+      collection(db, "unlocks"),
+      (snapshot) => {
+        setStats((prev) => ({ ...prev, totalUnlocks: snapshot.size }));
+        checkLoaded();
+      },
+      (error) => { console.error("Error fetching unlocks:", error); checkLoaded(); }
+    );
 
     return () => {
       unsubUsers();
@@ -184,13 +194,68 @@ export default function AdminAnalyticsPage() {
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center gap-3 mb-6">
                   <HiChartBar size={24} className="text-orange-500" />
                   <h2 className="text-lg font-bold text-gray-900">Detailed Analytics</h2>
                 </div>
-                <p className="text-gray-500 text-sm">
-                  Advanced charts and detailed analytics will be available in Iteration 2.
-                </p>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* User Role Pie Chart */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-4 text-center">User Distribution</h3>
+                    {stats.totalUsers > 0 ? (() => {
+                      const data = [
+                        { name: "Homeowners", value: stats.homeowners, color: "#22c55e" },
+                        { name: "Contractors", value: stats.contractors, color: "#f97316" },
+                        { name: "Admins", value: stats.admins, color: "#8b5cf6" },
+                      ].filter((d) => d.value > 0);
+                      return (
+                        <ResponsiveContainer width="100%" height={240}>
+                          <PieChart>
+                            <Pie data={data} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value">
+                              {data.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
+                            </Pie>
+                            <Tooltip formatter={(v) => [`${v} user${Number(v) !== 1 ? "s" : ""}`, ""]} />
+                            <Legend />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      );
+                    })() : (
+                      <div className="flex items-center justify-center h-60 text-gray-400 text-sm">No user data yet</div>
+                    )}
+                  </div>
+
+                  {/* Platform Activity Bar Chart */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-4 text-center">Platform Activity</h3>
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart
+                        data={[
+                          { name: "Projects", value: stats.projects, fill: "#8b5cf6" },
+                          { name: "Bids", value: stats.bids, fill: "#f97316" },
+                          { name: "Chats", value: stats.conversations, fill: "#14b8a6" },
+                          { name: "Unlocks", value: stats.totalUnlocks, fill: "#6366f1" },
+                        ]}
+                        margin={{ top: 8, right: 16, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                        <Tooltip formatter={(v) => [`${v}`, ""]} />
+                        <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                          {[
+                            { fill: "#8b5cf6" },
+                            { fill: "#f97316" },
+                            { fill: "#14b8a6" },
+                            { fill: "#6366f1" },
+                          ].map((e, idx) => (
+                            <Cell key={idx} fill={e.fill} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
               </div>
             </>
           )}

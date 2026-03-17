@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Admin check: uses the role field in the users collection instead of hardcoded email
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Users can read their own document
+      allow read: if request.auth.uid == userId;
+      // Contractors can read other users' basic info (for display purposes)
+      allow read: if isAuthenticated() && userId != request.auth.uid;
+      // Admin can read all users
+      allow read: if isAdmin();
+      // Users can write their own doc only
+      allow write: if request.auth.uid == userId;
+      // Admin can write all users
+      allow write: if isAdmin();
+    }
+
+    // Projects collection
+    match /projects/{projectId} {
+      // Authenticated users can read
+      allow read: if isAuthenticated();
+      // Homeowners can create projects for themselves only
+      allow create: if isAuthenticated() &&
+                       request.resource.data.homeownerUid == request.auth.uid;
+      // Homeowners can update/delete their own projects
+      allow update, delete: if isAuthenticated() &&
+                               resource.data.homeownerUid == request.auth.uid;
+      // Admin can write all
+      allow write: if isAdmin();
+    }
+
+    // Unlocks collection
+    match /unlocks/{unlockId} {
+      // Authenticated users can read (to check if a project is unlocked)
+      allow read: if isAuthenticated();
+      // Contractors can only create unlocks for themselves
+      allow create: if isAuthenticated() &&
+                       request.resource.data.contractorUid == request.auth.uid;
+      // Admins can update/delete
+      allow update, delete: if isAdmin();
+    }
+
+    // Transactions collection
+    match /transactions/{transactionId} {
+      // Contractors can read their own transactions
+      allow read: if isAuthenticated() &&
+                     request.auth.uid == resource.data.contractorUid;
+      // Admin can read all
+      allow read: if isAdmin();
+      // Contractors can create their own transaction records
+      allow create: if isAuthenticated() &&
+                       request.resource.data.contractorUid == request.auth.uid;
+      // Admin can write all
+      allow write: if isAdmin();
+    }
+
+    // Conversations collection
+    match /conversations/{conversationId} {
+      // Only participants or admin can read/write
+      allow read, write: if isAuthenticated() &&
+                            (request.auth.uid == resource.data.homeownerUid ||
+                             request.auth.uid == resource.data.contractorUid ||
+                             isAdmin());
+      // Participants can create conversations
+      allow create: if isAuthenticated() &&
+                       (request.resource.data.contractorUid == request.auth.uid ||
+                        request.resource.data.homeownerUid == request.auth.uid);
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        // Only participants or admin can read
+        allow read: if isAuthenticated() &&
+                       (request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.homeownerUid ||
+                        request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.contractorUid ||
+                        isAdmin());
+        // Only participants can send messages, and only as themselves
+        allow create: if isAuthenticated() &&
+                         request.resource.data.senderId == request.auth.uid &&
+                         (request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.homeownerUid ||
+                          request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.contractorUid);
+        // Participants can update messages (e.g. mark as read)
+        allow update: if isAuthenticated() &&
+                         (request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.homeownerUid ||
+                          request.auth.uid == get(/databases/$(database)/documents/conversations/$(conversationId)).data.contractorUid ||
+                          isAdmin());
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Bids collection
+    match /bids/{bidId} {
+      // Authenticated users can read
+      allow read: if isAuthenticated();
+      // Contractors can create their own bids
+      allow create: if isAuthenticated() &&
+                       request.auth.uid == request.resource.data.contractorUid;
+      // Homeowners can update bid status for their projects only
+      allow update: if isAuthenticated() &&
+                       exists(/databases/$(database)/documents/projects/$(resource.data.projectId)) &&
+                       get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.homeownerUid == request.auth.uid;
+      // Admin can do all
+      allow write: if isAdmin();
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if isAuthenticated() &&
+                     request.auth.uid == resource.data.recipientUid;
+      // Admin can read all
+      allow read: if isAdmin();
+      // Users can update their own notifications (mark as read)
+      allow update: if isAuthenticated() &&
+                       request.auth.uid == resource.data.recipientUid;
+      // Authenticated users can create notifications (bid received, project unlocked, etc.)
+      allow create: if isAuthenticated();
+      // Admin can write all
+      allow write: if isAdmin();
+    }
+
+    // Settings (admin-managed only)
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Catch-all deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

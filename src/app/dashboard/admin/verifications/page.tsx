@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, onValue, update } from "firebase/database";
+import { collection, query, where, onSnapshot, updateDoc, doc, deleteField } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -28,28 +28,28 @@ export default function AdminVerificationsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    const usersRef = ref(db, "users");
-    const unsub = onValue(usersRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const allContractors: ContractorUser[] = Object.entries(data)
-          .map(([uid, value]) => ({ ...(value as Record<string, unknown>), uid } as unknown as ContractorUser))
-          .filter((u) => u.role === "contractor");
+    const q = query(collection(db, "users"), where("role", "==", "contractor"));
+    const unsub = onSnapshot(
+      q,
+      (snapshot) => {
+        const allContractors = snapshot.docs.map((doc) => ({
+          ...doc.data(),
+          uid: doc.id,
+        } as ContractorUser));
         setContractors(allContractors);
-      } else {
-        setContractors([]);
-      }
-      setLoading(false);
-    });
+        setLoading(false);
+      },
+      (error) => { console.error("Error loading contractors:", error); setLoading(false); }
+    );
     return () => unsub();
   }, []);
 
   const handleVerification = async (uid: string, status: "approved" | "rejected") => {
     setActionLoading(uid);
     try {
-      await update(ref(db, `users/${uid}`), {
+      await updateDoc(doc(db, "users", uid), {
         verificationStatus: status,
-        verifiedDate: status === "approved" ? new Date().toISOString() : null,
+        verifiedDate: status === "approved" ? new Date().toISOString() : deleteField(),
         updatedAt: new Date().toISOString(),
       });
       toast.success(`Contractor ${status} successfully!`);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ref, onValue, query, orderByChild, push, update, get } from "firebase/database";
+import { collection, query, where, onSnapshot, doc, runTransaction, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -9,6 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Button from "@/components/ui/Button";
 import toast from "react-hot-toast";
 import { ContractorUser, CreditPackage, CreditTransaction } from "@/types";
+import { formatDate } from "@/lib/utils";
 import {
   HiCreditCard,
   HiStar,
@@ -19,35 +20,11 @@ import {
   HiRefresh,
 } from "react-icons/hi";
 
-const CREDIT_PACKAGES: CreditPackage[] = [
-  {
-    id: "starter",
-    name: "Starter",
-    credits: 10,
-    price: 49,
-    pricePerCredit: 4.9,
-  },
-  {
-    id: "professional",
-    name: "Professional",
-    credits: 25,
-    price: 99,
-    pricePerCredit: 3.96,
-  },
-  {
-    id: "business",
-    name: "Business",
-    credits: 50,
-    price: 179,
-    pricePerCredit: 3.58,
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    credits: 100,
-    price: 299,
-    pricePerCredit: 2.99,
-  },
+const DEFAULT_PACKAGES: CreditPackage[] = [
+  { id: "starter", name: "Starter Pack", credits: 5, price: 29.99, pricePerCredit: 6.0 },
+  { id: "standard", name: "Standard Pack", credits: 15, price: 79.99, pricePerCredit: 5.33 },
+  { id: "pro", name: "Pro Pack", credits: 30, price: 149.99, pricePerCredit: 5.0 },
+  { id: "enterprise", name: "Enterprise Pack", credits: 60, price: 279.99, pricePerCredit: 4.67 },
 ];
 
 export default function ContractorCreditsPage() {
@@ -55,38 +32,53 @@ export default function ContractorCreditsPage() {
   const contractor = userProfile as ContractorUser | null;
   const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [transactionsLoading, setTransactionsLoading] = useState(true);
+  const [creditPackages, setCreditPackages] = useState<CreditPackage[]>(DEFAULT_PACKAGES);
 
   const creditBalance = contractor?.creditBalance ?? 0;
+
+  // Load credit packages from admin settings
+  useEffect(() => {
+    const fetchPackages = async () => {
+      try {
+        const snap = await getDoc(doc(db, "settings", "creditPackages"));
+        if (snap.exists()) {
+          const data = snap.data();
+          const pkgs = (data.packages as Array<{ id: string; label: string; credits: number; price: number }>)
+            .map((p) => ({
+              id: p.id,
+              name: p.label,
+              credits: p.credits,
+              price: p.price,
+              pricePerCredit: p.credits > 0 ? p.price / p.credits : 0,
+            }));
+          if (pkgs.length > 0) setCreditPackages(pkgs);
+        }
+      } catch {
+        // Fall back to defaults silently
+      }
+    };
+    fetchPackages();
+  }, []);
 
   // Fetch transaction history
   useEffect(() => {
     if (!userProfile) return;
 
-    const transactionsRef = query(
-      ref(db, "transactions"),
-      orderByChild("contractorUid")
+    const q = query(
+      collection(db, "transactions"),
+      where("contractorUid", "==", userProfile.uid)
     );
-    const unsubscribe = onValue(transactionsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const allTransactions: CreditTransaction[] = Object.entries(data).map(
-          ([id, value]) => ({
-            ...(value as Omit<CreditTransaction, "id">),
-            id,
-          })
-        );
-        const userTransactions = allTransactions
-          .filter((t) => t.contractorUid === userProfile.uid)
-          .sort(
-            (a, b) =>
-              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const userTransactions = snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() } as CreditTransaction))
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         setTransactions(userTransactions);
-      } else {
-        setTransactions([]);
-      }
-      setTransactionsLoading(false);
-    });
+        setTransactionsLoading(false);
+      },
+      (error) => { console.error("Error loading transactions:", error); setTransactionsLoading(false); }
+    );
 
     return () => unsubscribe();
   }, [userProfile]);
@@ -97,24 +89,23 @@ export default function ContractorCreditsPage() {
     if (!contractor) return;
     setBuyingId(pkg.id);
     try {
-      const balanceSnap = await get(ref(db, `users/${contractor.uid}/creditBalance`));
-      const currentBalance = (balanceSnap.val() as number) ?? 0;
-      const transactionRef = push(ref(db, "transactions"));
+      const userRef = doc(db, "users", contractor.uid);
+      const txRef = doc(collection(db, "transactions"));
       const now = new Date().toISOString();
 
-      const updates: Record<string, unknown> = {
-        [`users/${contractor.uid}/creditBalance`]: currentBalance + pkg.credits,
-        [`transactions/${transactionRef.key}`]: {
-          id: transactionRef.key,
+      await runTransaction(db, async (transaction) => {
+        const userSnap = await transaction.get(userRef);
+        const currentBalance = (userSnap.data()?.creditBalance as number) ?? 0;
+        transaction.update(userRef, { creditBalance: currentBalance + pkg.credits });
+        transaction.set(txRef, {
           contractorUid: contractor.uid,
           creditAmount: pkg.credits,
           cost: pkg.price,
           type: "purchase",
           timestamp: now,
-        },
-      };
+        });
+      });
 
-      await update(ref(db), updates);
       await refreshProfile();
       toast.success(`${pkg.credits} credits added! (Simulated — Stripe in Iteration 2)`);
     } catch {
@@ -178,8 +169,8 @@ export default function ContractorCreditsPage() {
               Choose a Credit Package
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {CREDIT_PACKAGES.map((pkg) => {
-                const isPopular = pkg.id === "professional";
+              {creditPackages.map((pkg, idx) => {
+                const isPopular = idx === 1;
                 return (
                   <div
                     key={pkg.id}
@@ -304,13 +295,7 @@ export default function ContractorCreditsPage() {
                           {tx.cost > 0 ? `$${tx.cost.toFixed(2)}` : "--"}
                         </td>
                         <td className="py-3 px-4 text-gray-500">
-                          {new Date(tx.timestamp).toLocaleDateString("en-CA", {
-                            year: "numeric",
-                            month: "short",
-                            day: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {formatDate(tx.timestamp)}
                         </td>
                       </tr>
                     ))}

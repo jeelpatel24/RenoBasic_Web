@@ -15,14 +15,21 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading) {
-      if (!firebaseUser) {
-        router.push("/login");
-        return;
-      }
-      if (userProfile && !allowedRoles.includes(userProfile.role)) {
-        router.push("/login");
-      }
+    if (loading) return;
+
+    if (!firebaseUser) {
+      router.push("/login");
+      return;
+    }
+
+    if (userProfile && !allowedRoles.includes(userProfile.role)) {
+      router.push("/login");
+      return;
+    }
+
+    // Enforce email verification for non-admin users
+    if (userProfile && userProfile.role !== "admin" && !firebaseUser.emailVerified) {
+      router.replace("/verify-email");
     }
   }, [firebaseUser, userProfile, loading, allowedRoles, router]);
 
@@ -41,6 +48,10 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
     return null;
   }
 
+  // Block unverified non-admin users from rendering dashboard content
+  if (userProfile.role !== "admin" && !firebaseUser.emailVerified) {
+    return null;
+  }
+
   return <>{children}</>;
 }
-
