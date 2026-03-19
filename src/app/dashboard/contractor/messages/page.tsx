@@ -90,9 +90,9 @@ function ContractorMessagesInner() {
     setConfirmDeleteConvId(null);
     setDeletingConv(true);
     try {
-      await deleteConversation(convId);
-      // If the deleted conversation was open, close the chat panel
+      // Close the chat panel BEFORE deleting so the messages listener unsubscribes first
       if (activeConv === convId) setActiveConv(null);
+      await deleteConversation(convId);
       toast.success("Conversation deleted.");
     } catch {
       toast.error("Failed to delete conversation.");

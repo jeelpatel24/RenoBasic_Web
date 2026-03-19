@@ -107,6 +107,10 @@ service cloud.firestore {
       allow delete: if isAuthenticated() &&
                        resource.data.contractorUid == request.auth.uid &&
                        resource.data.status == "submitted";
+      // Homeowners can delete any bid on their own project (e.g. when deleting the project)
+      allow delete: if isAuthenticated() &&
+                       exists(/databases/$(database)/documents/projects/$(resource.data.projectId)) &&
+                       get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.homeownerUid == request.auth.uid;
       // Admin can do all
       allow write: if isAdmin();
     }
