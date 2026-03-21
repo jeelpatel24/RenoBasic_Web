@@ -56,9 +56,21 @@ export default function ContractorProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showBidForm, setShowBidForm] = useState(false);
   const [bidLoading, setBidLoading] = useState(false);
-  const [bidItems, setBidItems] = useState([{ description: "", cost: 0 }]);
+
+  // ── Invoice state ──────────────────────────────────────────────────────────
+  const [bidCompanyName, setBidCompanyName] = useState("");
+  const [bidContactName, setBidContactName] = useState("");
+  const [bidContactEmail, setBidContactEmail] = useState("");
+  const [bidContactPhone, setBidContactPhone] = useState("");
+  const [lineItems, setLineItems] = useState([{ description: "", qty: 1, unitPrice: 0 }]);
+  const [taxRate, setTaxRate] = useState(0);
   const [bidTimeline, setBidTimeline] = useState("");
   const [bidNotes, setBidNotes] = useState("");
+
+  // Computed totals
+  const subtotal = lineItems.reduce((sum, item) => sum + item.qty * item.unitPrice, 0);
+  const taxAmount = subtotal * taxRate / 100;
+  const totalAmount = subtotal + taxAmount;
 
   useEffect(() => {
     if (!projectId || !contractor) return;
@@ -85,6 +97,16 @@ export default function ContractorProjectDetailPage() {
     fetchProject();
   }, [projectId, contractor]);
 
+  // Pre-fill contractor details from profile
+  useEffect(() => {
+    if (contractor) {
+      setBidCompanyName(contractor.companyName || "");
+      setBidContactName(contractor.contactName || contractor.fullName || "");
+      setBidContactEmail(contractor.email || "");
+      setBidContactPhone(contractor.phone || "");
+    }
+  }, [contractor]);
+
   const handleStartConversation = async () => {
     if (!contractor || !project || !privateDetails) return;
     try {
@@ -102,54 +124,81 @@ export default function ContractorProjectDetailPage() {
     }
   };
 
-  const addBidItem = () => setBidItems([...bidItems, { description: "", cost: 0 }]);
-  const removeBidItem = (index: number) => {
-    if (bidItems.length > 1) setBidItems(bidItems.filter((_, i) => i !== index));
+  // ── Line item helpers ──────────────────────────────────────────────────────
+  const addLineItem = () => setLineItems([...lineItems, { description: "", qty: 1, unitPrice: 0 }]);
+  const removeLineItem = (index: number) => {
+    if (lineItems.length > 1) setLineItems(lineItems.filter((_, i) => i !== index));
   };
-  const updateBidItem = (index: number, field: "description" | "cost", value: string | number) => {
-    const updated = [...bidItems];
-    if (field === "cost") updated[index].cost = Number(value);
-    else updated[index].description = value as string;
-    setBidItems(updated);
+  const updateLineItem = (index: number, field: "description" | "qty" | "unitPrice", value: string | number) => {
+    const updated = [...lineItems];
+    if (field === "description") updated[index].description = value as string;
+    else if (field === "qty") updated[index].qty = Math.max(1, Number(value) || 1);
+    else updated[index].unitPrice = Number(value) || 0;
+    setLineItems(updated);
   };
-
-  const totalCost = bidItems.reduce((sum, item) => sum + item.cost, 0);
 
   const handleSubmitBid = async () => {
     if (!contractor || !project) return;
-    if (bidItems.some((item) => !item.description.trim() || item.cost <= 0)) {
-      toast.error("Please fill in all bid items with valid costs.");
+
+    if (lineItems.some((item) => !item.description.trim() || item.unitPrice <= 0 || item.qty <= 0)) {
+      toast.error("Please fill in all line items with valid quantities and prices.");
       return;
     }
     if (!bidTimeline.trim()) {
       toast.error("Please provide an estimated timeline.");
       return;
     }
+
     setBidLoading(true);
     try {
+      const invoiceLineItems = lineItems.map((item) => ({
+        description: item.description,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        subtotal: item.qty * item.unitPrice,
+      }));
+
+      // Legacy itemizedCosts for backward compat
+      const legacyCosts = invoiceLineItems.map((item) => ({
+        description: item.description,
+        cost: item.subtotal,
+      }));
+
       await submitBid({
         contractorUid: contractor.uid,
         homeownerUid: project.homeownerUid,
         projectId: project.id,
         contractorName: contractor.fullName,
         projectCategory: project.categoryName || CATEGORY_LABELS[project.category],
-        itemizedCosts: bidItems,
-        totalCost,
+        companyName: bidCompanyName,
+        contactName: bidContactName,
+        contactEmail: bidContactEmail,
+        contactPhone: bidContactPhone,
+        lineItems: invoiceLineItems,
+        subtotal,
+        taxRate,
+        taxAmount,
+        totalAmount,
+        itemizedCosts: legacyCosts,
+        totalCost: totalAmount,
         estimatedTimeline: bidTimeline,
         notes: bidNotes,
       });
+
       await createNotification({
         recipientUid: project.homeownerUid,
         type: "bid_received",
         title: "New Bid Received",
-        message: `${contractor.fullName} submitted a bid for your ${project.categoryName || CATEGORY_LABELS[project.category]} project.`,
+        message: `${contractor.fullName} submitted a bid of $${totalAmount.toFixed(2)} for your ${project.categoryName || CATEGORY_LABELS[project.category]} project.`,
         read: false,
         createdAt: new Date().toISOString(),
         relatedId: project.id,
       });
+
       toast.success("Bid submitted successfully!");
       setShowBidForm(false);
-      setBidItems([{ description: "", cost: 0 }]);
+      setLineItems([{ description: "", qty: 1, unitPrice: 0 }]);
+      setTaxRate(0);
       setBidTimeline("");
       setBidNotes("");
     } catch {
@@ -404,77 +453,161 @@ export default function ContractorProjectDetailPage() {
                 </Button>
               </div>
 
-              {/* Bid Form */}
+              {/* Invoice Bid Form */}
               {showBidForm && (
-                <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-                  <h2 className="text-lg font-bold text-gray-900">Submit Your Bid</h2>
+                <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6">
+                  <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <HiDocumentText size={20} className="text-orange-500" />
+                    Submit Invoice Bid
+                  </h2>
 
-                  <div className="space-y-3">
-                    <label className="block text-sm font-medium text-gray-700">Itemized Costs</label>
-                    {bidItems.map((item, index) => (
-                      <div key={index} className="flex gap-3 items-center">
+                  {/* Section 1 — Contractor Details */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 pb-2 border-b border-gray-100">
+                      Contractor Details
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {[
+                        { label: "Company Name", value: bidCompanyName, onChange: setBidCompanyName, placeholder: "Your company name" },
+                        { label: "Contact Name", value: bidContactName, onChange: setBidContactName, placeholder: "Contact person" },
+                        { label: "Email", value: bidContactEmail, onChange: setBidContactEmail, placeholder: "contact@company.com" },
+                        { label: "Phone", value: bidContactPhone, onChange: setBidContactPhone, placeholder: "(416) 555-0100" },
+                      ].map(({ label, value, onChange, placeholder }) => (
+                        <div key={label}>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                          <input
+                            type="text"
+                            value={value}
+                            onChange={(e) => onChange(e.target.value)}
+                            placeholder={placeholder}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Section 2 — Line Items */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 pb-2 border-b border-gray-100">
+                      Line Items
+                    </h3>
+                    {/* Column headers */}
+                    <div className="hidden sm:grid grid-cols-[1fr_60px_100px_80px_32px] gap-2 text-xs font-semibold text-gray-500 mb-2 px-1">
+                      <span>Description</span>
+                      <span className="text-center">Qty</span>
+                      <span className="text-right">Unit Price ($)</span>
+                      <span className="text-right">Subtotal</span>
+                      <span />
+                    </div>
+
+                    {lineItems.map((item, index) => (
+                      <div key={index} className="grid grid-cols-[1fr_60px_100px_80px_32px] gap-2 mb-2 items-center">
                         <input
                           type="text"
                           placeholder="Description"
                           value={item.description}
-                          onChange={(e) => updateBidItem(index, "description", e.target.value)}
-                          className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          onChange={(e) => updateLineItem(index, "description", e.target.value)}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
                         <input
                           type="number"
-                          placeholder="Cost"
-                          value={item.cost || ""}
-                          onChange={(e) => updateBidItem(index, "cost", e.target.value)}
-                          className="w-32 px-4 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          min="1"
+                          placeholder="1"
+                          value={item.qty || ""}
+                          onChange={(e) => updateLineItem(index, "qty", e.target.value)}
+                          className="px-2 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm text-center focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
-                        <button
-                          onClick={() => removeBidItem(index)}
-                          className="text-red-400 hover:text-red-600 p-1"
-                        >
-                          <HiTrash size={18} />
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={item.unitPrice || ""}
+                          onChange={(e) => updateLineItem(index, "unitPrice", e.target.value)}
+                          className="px-2 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm text-right focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        />
+                        <div className="text-right text-sm font-medium text-gray-700 pr-1">
+                          ${(item.qty * item.unitPrice).toFixed(2)}
+                        </div>
+                        <button onClick={() => removeLineItem(index)} className="text-red-400 hover:text-red-600 flex items-center justify-center">
+                          <HiTrash size={17} />
                         </button>
                       </div>
                     ))}
+
                     <button
-                      onClick={addBidItem}
-                      className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1"
+                      onClick={addLineItem}
+                      className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1 mt-1"
                     >
-                      <HiPlus size={16} /> Add Item
+                      <HiPlus size={16} /> Add Line Item
                     </button>
                   </div>
 
-                  <div className="bg-orange-50 rounded-lg p-3">
-                    <p className="text-sm font-medium text-orange-700">
-                      Total: ${totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
-                    </p>
+                  {/* Section 3 — Invoice Summary */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3 pb-2 border-b border-gray-100">
+                      Invoice Summary
+                    </h3>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm text-gray-600">
+                        <span>Subtotal</span>
+                        <span>${subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-gray-600">
+                        <span>Tax</span>
+                        <select
+                          value={taxRate}
+                          onChange={(e) => setTaxRate(Number(e.target.value))}
+                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-orange-400"
+                        >
+                          <option value={0}>No Tax (0%)</option>
+                          <option value={5}>GST (5%)</option>
+                          <option value={13}>HST (13%)</option>
+                          <option value={15}>HST (15%)</option>
+                        </select>
+                      </div>
+                      {taxRate > 0 && (
+                        <div className="flex justify-between text-sm text-gray-600">
+                          <span>Tax Amount ({taxRate}%)</span>
+                          <span>${taxAmount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center font-bold text-orange-600 border-t border-orange-100 pt-2 mt-2">
+                        <span className="text-base text-gray-900">Total</span>
+                        <span className="text-xl">${totalAmount.toFixed(2)}</span>
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Estimated Timeline
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g., 3–4 weeks"
-                      value={bidTimeline}
-                      onChange={(e) => setBidTimeline(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <textarea
-                      rows={3}
-                      placeholder="Any additional notes..."
-                      value={bidNotes}
-                      onChange={(e) => setBidNotes(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
-                    />
+                  {/* Section 4 — Timeline & Notes */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Estimated Timeline <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g., 3–4 weeks"
+                        value={bidTimeline}
+                        onChange={(e) => setBidTimeline(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+                      <textarea
+                        rows={2}
+                        placeholder="Any additional notes..."
+                        value={bidNotes}
+                        onChange={(e) => setBidNotes(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                      />
+                    </div>
                   </div>
 
                   <Button fullWidth loading={bidLoading} onClick={handleSubmitBid}>
-                    Submit Bid (${totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")})
+                    Submit Invoice Bid (${totalAmount.toFixed(2)})
                   </Button>
                 </div>
               )}

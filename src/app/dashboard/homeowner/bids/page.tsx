@@ -169,27 +169,71 @@ export default function HomeownerBidsPage() {
                     </p>
                   </div>
 
-                  {/* Itemized costs */}
-                  <div className="bg-gray-50 rounded-lg p-3 mb-3 text-sm">
-                    {bid.itemizedCosts.map((item, i) => (
-                      <div key={i} className="flex justify-between py-1">
-                        <span className="text-gray-600">{item.description}</span>
-                        <span className="text-gray-900 font-medium">
-                          ${(Number(item.cost) || 0)
-                            .toFixed(0)
-                            .replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+                  {/* Invoice / Itemized costs */}
+                  {bid.lineItems && bid.lineItems.length > 0 ? (
+                    <div className="border border-gray-200 rounded-lg overflow-hidden mb-3 text-sm">
+                      {/* Contractor details */}
+                      {(bid.companyName || bid.contactEmail || bid.contactPhone) && (
+                        <div className="bg-orange-50 px-3 py-2 border-b border-orange-100">
+                          {bid.companyName && <p className="font-semibold text-orange-700">{bid.companyName}</p>}
+                          {bid.contactName && <p className="text-gray-600 text-xs">{bid.contactName}</p>}
+                          {bid.contactEmail && <p className="text-gray-500 text-xs">{bid.contactEmail}</p>}
+                          {bid.contactPhone && <p className="text-gray-500 text-xs">{bid.contactPhone}</p>}
+                        </div>
+                      )}
+                      {/* Column headers */}
+                      <div className="grid grid-cols-[1fr_40px_80px_80px] gap-1 px-3 py-1.5 bg-gray-100 text-xs font-semibold text-gray-500">
+                        <span>Description</span>
+                        <span className="text-center">Qty</span>
+                        <span className="text-right">Unit Price</span>
+                        <span className="text-right">Subtotal</span>
+                      </div>
+                      {/* Line items */}
+                      {bid.lineItems.map((item, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_40px_80px_80px] gap-1 px-3 py-1.5 border-b border-gray-100 text-sm">
+                          <span className="text-gray-700">{item.description}</span>
+                          <span className="text-center text-gray-500">{item.qty}</span>
+                          <span className="text-right text-gray-500">${(item.unitPrice || 0).toFixed(2)}</span>
+                          <span className="text-right font-medium text-gray-800">${(item.subtotal || 0).toFixed(2)}</span>
+                        </div>
+                      ))}
+                      {/* Summary */}
+                      <div className="px-3 py-2 space-y-1 text-sm">
+                        <div className="flex justify-between text-gray-500">
+                          <span>Subtotal</span>
+                          <span>${(bid.subtotal ?? 0).toFixed(2)}</span>
+                        </div>
+                        {(bid.taxRate ?? 0) > 0 && (
+                          <div className="flex justify-between text-gray-500">
+                            <span>Tax ({bid.taxRate}%)</span>
+                            <span>${(bid.taxAmount ?? 0).toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between font-bold text-gray-900 border-t border-gray-200 pt-1">
+                          <span>Total</span>
+                          <span className="text-orange-600">${(bid.totalAmount ?? bid.totalCost ?? 0).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Legacy format */
+                    <div className="bg-gray-50 rounded-lg p-3 mb-3 text-sm">
+                      {bid.itemizedCosts.map((item, i) => (
+                        <div key={i} className="flex justify-between py-1">
+                          <span className="text-gray-600">{item.description}</span>
+                          <span className="text-gray-900 font-medium">
+                            ${(Number(item.cost) || 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between py-1 border-t border-gray-200 mt-1 pt-2 font-bold">
+                        <span className="text-gray-900">Total</span>
+                        <span className="text-orange-600">
+                          ${(Number(bid.totalCost) || 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
                         </span>
                       </div>
-                    ))}
-                    <div className="flex justify-between py-1 border-t border-gray-200 mt-1 pt-2 font-bold">
-                      <span className="text-gray-900">Total</span>
-                      <span className="text-orange-600">
-                        ${(Number(bid.totalCost) || 0)
-                          .toFixed(0)
-                          .replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
-                      </span>
                     </div>
-                  </div>
+                  )}
 
                   <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-3">
                     <span className="flex items-center gap-1">

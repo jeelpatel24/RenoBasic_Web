@@ -468,14 +468,50 @@ export default function HomeownerProjectDetailPage() {
                       <p className="text-xl font-bold text-orange-600">${bid.totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</p>
                     </div>
 
-                    <div className="bg-gray-50 rounded-lg p-3 text-sm mb-3">
-                      {bid.itemizedCosts.map((item, i) => (
-                        <div key={i} className="flex justify-between py-1">
-                          <span className="text-gray-600">{item.description}</span>
-                          <span className="text-gray-900">${item.cost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
+                    {/* Invoice / Itemized view */}
+                    {bid.lineItems && bid.lineItems.length > 0 ? (
+                      <div className="border border-gray-200 rounded-lg overflow-hidden mb-3 text-sm">
+                        {(bid.companyName || bid.contactEmail) && (
+                          <div className="bg-orange-50 px-3 py-2 border-b border-orange-100">
+                            {bid.companyName && <p className="font-semibold text-orange-700 text-xs">{bid.companyName}</p>}
+                            {bid.contactName && <p className="text-gray-600 text-xs">{bid.contactName}</p>}
+                            {bid.contactEmail && <p className="text-gray-500 text-xs">{bid.contactEmail}</p>}
+                            {bid.contactPhone && <p className="text-gray-500 text-xs">{bid.contactPhone}</p>}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-[1fr_36px_76px_76px] gap-1 px-3 py-1.5 bg-gray-100 text-xs font-semibold text-gray-500">
+                          <span>Description</span><span className="text-center">Qty</span>
+                          <span className="text-right">Unit Price</span><span className="text-right">Subtotal</span>
                         </div>
-                      ))}
-                    </div>
+                        {bid.lineItems.map((item, i) => (
+                          <div key={i} className="grid grid-cols-[1fr_36px_76px_76px] gap-1 px-3 py-1.5 border-b border-gray-100">
+                            <span className="text-gray-700">{item.description}</span>
+                            <span className="text-center text-gray-500">{item.qty}</span>
+                            <span className="text-right text-gray-500">${(item.unitPrice || 0).toFixed(2)}</span>
+                            <span className="text-right font-medium text-gray-800">${(item.subtotal || 0).toFixed(2)}</span>
+                          </div>
+                        ))}
+                        <div className="px-3 py-2 space-y-1 text-sm">
+                          <div className="flex justify-between text-gray-500 text-xs"><span>Subtotal</span><span>${(bid.subtotal ?? 0).toFixed(2)}</span></div>
+                          {(bid.taxRate ?? 0) > 0 && (
+                            <div className="flex justify-between text-gray-500 text-xs"><span>Tax ({bid.taxRate}%)</span><span>${(bid.taxAmount ?? 0).toFixed(2)}</span></div>
+                          )}
+                          <div className="flex justify-between font-bold border-t border-gray-200 pt-1">
+                            <span className="text-gray-900">Total</span>
+                            <span className="text-orange-600">${(bid.totalAmount ?? bid.totalCost ?? 0).toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-gray-50 rounded-lg p-3 text-sm mb-3">
+                        {bid.itemizedCosts.map((item, i) => (
+                          <div key={i} className="flex justify-between py-1">
+                            <span className="text-gray-600">{item.description}</span>
+                            <span className="text-gray-900">${item.cost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="flex gap-4 text-sm text-gray-500 mb-3">
                       <span className="flex items-center gap-1">

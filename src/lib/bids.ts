@@ -10,10 +10,10 @@ import {
   getDocs,
   orderBy,
 } from "firebase/firestore";
-import { Bid, BidItem } from "@/types";
+import { Bid, BidItem, InvoiceLineItem } from "@/types";
 
 /**
- * Submit a new bid for a project.
+ * Submit a new bid for a project (invoice format).
  */
 export async function submitBid(bidData: {
   contractorUid: string;
@@ -21,6 +21,17 @@ export async function submitBid(bidData: {
   projectId: string;
   contractorName: string;
   projectCategory: string;
+  // Invoice fields
+  companyName?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  lineItems?: InvoiceLineItem[];
+  subtotal?: number;
+  taxRate?: number;
+  taxAmount?: number;
+  totalAmount?: number;
+  // Legacy / backward-compat fields
   itemizedCosts: BidItem[];
   totalCost: number;
   estimatedTimeline: string;

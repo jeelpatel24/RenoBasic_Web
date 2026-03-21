@@ -263,6 +263,15 @@ export interface Conversation {
 }
 
 // ── Bidding ────────────────────────────────────────────────────────
+
+/** One line on a contractor's invoice bid */
+export interface InvoiceLineItem {
+  description: string;
+  qty: number;
+  unitPrice: number;
+  subtotal: number; // qty * unitPrice
+}
+
 export interface Bid {
   id: string;
   contractorUid: string;
@@ -270,14 +279,29 @@ export interface Bid {
   projectId: string;
   contractorName: string;
   projectCategory: string;
+
+  // ── Invoice fields (new) ──────────────────────────────────────────
+  companyName?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  lineItems?: InvoiceLineItem[];
+  subtotal?: number;
+  taxRate?: number;    // 0 | 5 | 13 | 15
+  taxAmount?: number;
+  totalAmount?: number;
+
+  // ── Legacy fields (kept for backward compat) ─────────────────────
   itemizedCosts: BidItem[];
   totalCost: number;
+
   estimatedTimeline: string;
   notes: string;
   status: "submitted" | "accepted" | "rejected";
   submittedAt: string;
 }
 
+/** Legacy bid item — kept for backward compatibility */
 export interface BidItem {
   description: string;
   cost: number;
