@@ -979,7 +979,7 @@ export default function HomeownerProjectsPage() {
                           <select
                             value={project.status}
                             disabled={statusUpdating === project.id}
-                            onClick={(e) => e.preventDefault()}
+                            onClick={(e) => e.stopPropagation()}
                             onChange={(e) =>
                               handleStatusUpdate(
                                 e,
