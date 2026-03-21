@@ -427,10 +427,12 @@ export default function HomeownerProjectDetailPage() {
                       .map((bid) => (
                         <tr key={bid.id} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900">{bid.contractorName}</td>
-                          <td className="px-4 py-3 font-bold text-orange-600">${bid.totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</td>
+                          <td className="px-4 py-3 font-bold text-orange-600">${(bid.totalAmount ?? bid.totalCost ?? 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</td>
                           <td className="px-4 py-3 text-gray-600">{bid.estimatedTimeline}</td>
                           <td className="px-4 py-3 text-gray-600">
-                            {bid.itemizedCosts.map((item) => item.description).join(", ")}
+                            {bid.lineItems && bid.lineItems.length > 0
+                              ? bid.lineItems.map((item: {description: string}) => item.description).join(", ")
+                              : (bid.itemizedCosts ?? []).map((item: {description: string}) => item.description).join(", ") || "—"}
                           </td>
                         </tr>
                       ))}
@@ -465,7 +467,7 @@ export default function HomeownerProjectDetailPage() {
                           {bid.status}
                         </span>
                       </div>
-                      <p className="text-xl font-bold text-orange-600">${bid.totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</p>
+                      <p className="text-xl font-bold text-orange-600">${(bid.totalAmount ?? bid.totalCost ?? 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</p>
                     </div>
 
                     {/* Invoice / Itemized view */}
@@ -504,10 +506,10 @@ export default function HomeownerProjectDetailPage() {
                       </div>
                     ) : (
                       <div className="bg-gray-50 rounded-lg p-3 text-sm mb-3">
-                        {bid.itemizedCosts.map((item, i) => (
+                        {(bid.itemizedCosts ?? []).map((item: {description: string; cost: number}, i: number) => (
                           <div key={i} className="flex justify-between py-1">
                             <span className="text-gray-600">{item.description}</span>
-                            <span className="text-gray-900">${item.cost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
+                            <span className="text-gray-900">${(Number(item.cost) || 0).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
                           </div>
                         ))}
                       </div>

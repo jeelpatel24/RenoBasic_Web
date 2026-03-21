@@ -218,7 +218,7 @@ export default function HomeownerBidsPage() {
                   ) : (
                     /* Legacy format */
                     <div className="bg-gray-50 rounded-lg p-3 mb-3 text-sm">
-                      {bid.itemizedCosts.map((item, i) => (
+                      {(bid.itemizedCosts ?? []).map((item: {description: string; cost: number}, i: number) => (
                         <div key={i} className="flex justify-between py-1">
                           <span className="text-gray-600">{item.description}</span>
                           <span className="text-gray-900 font-medium">
