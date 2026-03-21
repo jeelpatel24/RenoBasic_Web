@@ -55,3 +55,12 @@ export function validateConfirmPassword(password: string, confirmPassword: strin
   return { valid: true };
 }
 
+export function validatePostalCode(postalCode: string): ValidationResult {
+  if (!postalCode.trim()) return { valid: false, error: "Postal code is required." };
+  const cleaned = postalCode.replace(/\s/g, "").toUpperCase();
+  if (!/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(cleaned)) {
+    return { valid: false, error: "Please enter a valid Canadian postal code (e.g. M5V 2T6)." };
+  }
+  return { valid: true };
+}
+

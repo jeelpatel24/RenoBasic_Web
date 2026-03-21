@@ -29,6 +29,7 @@ import {
   PROVINCE_OPTIONS,
 } from "@/types";
 import toast from "react-hot-toast";
+import { validatePostalCode } from "@/lib/validation";
 import { formatDate } from "@/lib/utils";
 import {
   HiClipboardList,
@@ -185,8 +186,8 @@ export default function HomeownerProjectsPage() {
       newErrors.streetAddress = "Street address is required.";
     if (!form.city.trim()) newErrors.city = "City is required.";
     if (!form.province) newErrors.province = "Please select a province.";
-    if (!form.postalCode.trim())
-      newErrors.postalCode = "Postal code is required.";
+    const postalResult = validatePostalCode(form.postalCode);
+    if (!postalResult.valid) newErrors.postalCode = postalResult.error!;
 
     // Section 3
     if (!form.description.trim())
