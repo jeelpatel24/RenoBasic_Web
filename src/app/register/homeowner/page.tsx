@@ -62,7 +62,7 @@ export default function HomeownerRegisterPage() {
     try {
       await registerHomeowner(form.email, form.password, form.fullName, form.phone);
       toast.success("Account created! Please check your email for verification.");
-      router.push("/dashboard/homeowner");
+      router.push("/verify-email");
     } catch (error: unknown) {
       const firebaseError = error as { code?: string };
       if (firebaseError.code === "auth/email-already-in-use") {

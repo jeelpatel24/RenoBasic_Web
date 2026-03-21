@@ -10,6 +10,7 @@ import Link from "next/link";
 import Button from "@/components/ui/Button";
 import toast from "react-hot-toast";
 import { formatDate } from "@/lib/utils";
+import { createNotification } from "@/lib/notifications";
 import { HiUsers, HiShieldCheck, HiClipboardList, HiCreditCard, HiChat, HiCollection } from "react-icons/hi";
 
 export default function AdminDashboard() {
@@ -115,6 +116,17 @@ export default function AdminDashboard() {
         verificationStatus: status,
         verifiedDate: status === "approved" ? new Date().toISOString() : deleteField(),
         updatedAt: new Date().toISOString(),
+      });
+      await createNotification({
+        recipientUid: uid,
+        type: status === "approved" ? "verification_approved" : "verification_rejected",
+        title: status === "approved" ? "Account Verified!" : "Verification Rejected",
+        message:
+          status === "approved"
+            ? "Your contractor account has been verified. You can now access the marketplace."
+            : "Your contractor verification was not approved. Please contact support for assistance.",
+        read: false,
+        createdAt: new Date().toISOString(),
       });
       toast.success(`Contractor ${status === "approved" ? "approved" : "rejected"} successfully.`);
     } catch {

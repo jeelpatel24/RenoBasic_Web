@@ -8,6 +8,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import Button from "@/components/ui/Button";
 import { ContractorUser } from "@/types";
 import toast from "react-hot-toast";
+import { createNotification } from "@/lib/notifications";
 import {
   HiShieldCheck,
   HiCheckCircle,
@@ -51,6 +52,17 @@ export default function AdminVerificationsPage() {
         verificationStatus: status,
         verifiedDate: status === "approved" ? new Date().toISOString() : deleteField(),
         updatedAt: new Date().toISOString(),
+      });
+      await createNotification({
+        recipientUid: uid,
+        type: status === "approved" ? "verification_approved" : "verification_rejected",
+        title: status === "approved" ? "Account Verified!" : "Verification Rejected",
+        message:
+          status === "approved"
+            ? "Your contractor account has been verified. You can now access the marketplace."
+            : "Your contractor verification was not approved. Please contact support for assistance.",
+        read: false,
+        createdAt: new Date().toISOString(),
       });
       toast.success(`Contractor ${status} successfully!`);
     } catch {

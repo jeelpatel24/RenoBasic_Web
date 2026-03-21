@@ -84,7 +84,7 @@ export default function ContractorRegisterPage() {
         form.obrNumber
       );
       toast.success("Account created! Your verification is pending admin review.");
-      router.push("/dashboard/contractor");
+      router.push("/verify-email");
     } catch (error: unknown) {
       const firebaseError = error as { code?: string };
       if (firebaseError.code === "auth/email-already-in-use") {
