@@ -144,7 +144,7 @@ export default function ContractorBidsPage() {
                       <div className="flex flex-wrap gap-4 mt-3 text-sm text-gray-600">
                         <span className="flex items-center gap-1">
                           <HiCurrencyDollar size={16} className="text-gray-400" />
-                          ${bid.totalCost.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+                          ${(Number(bid.totalAmount ?? bid.totalCost ?? 0)).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
                         </span>
                         <span className="flex items-center gap-1">
                           <HiClock size={16} className="text-gray-400" />
