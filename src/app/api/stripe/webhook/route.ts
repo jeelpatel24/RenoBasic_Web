@@ -76,25 +76,20 @@ export async function POST(request: NextRequest) {
   // ── 3. Handle checkout.session.completed ────────────────────────────────
   const PRICE_CREDITS = buildPriceMap();
 
-  console.log("[Stripe Webhook] Event type:", event.type);
-  console.log("[Stripe Webhook] PRICE MAP:", JSON.stringify(PRICE_CREDITS));
-
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    console.log("[Stripe Webhook] Session ID:", session.id, "| client_reference_id:", session.client_reference_id);
 
     const uid = session.client_reference_id;
     if (!uid) {
-      console.error("[Stripe Webhook] SKIP — no client_reference_id in session:", session.id);
+      console.error("[Stripe Webhook] No client_reference_id in session:", session.id);
       return NextResponse.json({ received: true });
     }
 
     const lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 1 });
     const priceId = lineItems.data[0]?.price?.id;
-    console.log("[Stripe Webhook] Price ID from line items:", priceId);
 
     if (!priceId || PRICE_CREDITS[priceId] === undefined) {
-      console.error("[Stripe Webhook] SKIP — unknown price ID:", priceId, "| known IDs:", Object.keys(PRICE_CREDITS));
+      console.error("[Stripe Webhook] Unknown price ID:", priceId, "Session:", session.id);
       return NextResponse.json({ received: true });
     }
 
