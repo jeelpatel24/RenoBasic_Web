@@ -96,9 +96,32 @@ export async function POST(request: NextRequest) {
     const creditsToAdd = PRICE_CREDITS[priceId];
     const amountPaid = (session.amount_total ?? 0) / 100; // pence/cents → dollars
 
-    // ── 4. Atomically credit the user's account ──────────────────────────
+    const db = getAdminDb();
+
+    // ── 4. Idempotency guard — skip if already processed ────────────────
+    // Stripe retries on any non-2xx or network timeout. Without this check,
+    // a retry after a slow-but-successful Firestore write would add credits twice.
     try {
-      const db = getAdminDb();
+      const existing = await db
+        .collection("transactions")
+        .where("stripeSessionId", "==", session.id)
+        .limit(1)
+        .get();
+
+      if (!existing.empty) {
+        console.log(
+          `[Stripe Webhook] Duplicate event — already processed session: ${session.id}`
+        );
+        return NextResponse.json({ received: true });
+      }
+    } catch (err) {
+      // If the idempotency check itself fails, fall through and let the
+      // transaction attempt run; Firestore's atomic write will catch true duplicates.
+      console.warn("[Stripe Webhook] Idempotency check failed, proceeding:", err);
+    }
+
+    // ── 5. Atomically credit the user's account ──────────────────────────
+    try {
       const userRef = db.collection("users").doc(uid);
       const txRef = db.collection("transactions").doc();
 
