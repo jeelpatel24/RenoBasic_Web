@@ -25,7 +25,6 @@ export default function HomeownerMessagesPage() {
   const [activeConv, setActiveConv] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Delete conversation state
@@ -66,13 +65,14 @@ export default function HomeownerMessagesPage() {
   }, [messages]);
 
   const handleSend = async () => {
-    if (!newMessage.trim() || !activeConv || !userProfile) return;
     const text = newMessage.trim();
-    setSending(true);
+    if (!text || !activeConv || !userProfile) return;
+    // Clear input immediately — Firestore's real-time listener adds the message
+    // to the list on its own without waiting for the write to complete.
+    setNewMessage("");
     try {
       await sendMessage(activeConv, userProfile.uid, userProfile.fullName, text);
-      setNewMessage("");
-      // Notify the contractor
+      // Notify the contractor (fire-and-forget — never blocks the UI)
       if (activeConversation?.contractorUid) {
         createNotification({
           recipientUid: activeConversation.contractorUid,
@@ -86,8 +86,7 @@ export default function HomeownerMessagesPage() {
       }
     } catch {
       toast.error("Failed to send message.");
-    } finally {
-      setSending(false);
+      setNewMessage(text); // Restore text so the user can retry
     }
   };
 
@@ -229,13 +228,13 @@ export default function HomeownerMessagesPage() {
                       placeholder="Type a message..."
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && !sending && handleSend()}
+                      onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
                       className="flex-1 px-4 py-2 border border-gray-300 rounded-full text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                     <Button
                       size="sm"
                       onClick={handleSend}
-                      disabled={!newMessage.trim() || sending}
+                      disabled={!newMessage.trim()}
                       className="!rounded-full !px-4"
                     >
                       <HiPaperAirplane size={18} />
